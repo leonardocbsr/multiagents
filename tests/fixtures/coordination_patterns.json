@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "Canonical test cases for coordination pattern regexes.",
+    "Python: src/chat/router.py  |  TypeScript: web/src/types.ts",
+    "",
+    "Status 'expected' values use Python's case-preserving behavior.",
+    "TypeScript normalizes to uppercase via .toUpperCase() for display."
+  ],
+
+  "mentions": [
+    { "input": "@Claude what do you think?", "expected": ["Claude"] },
+    { "input": "@kimi and @Codex please review", "expected": ["kimi", "Codex"] },
+    { "input": "No mentions here", "expected": [] },
+    { "input": "email user@example.com", "expected": ["example"] },
+    { "input": "/@Claude slash-prefixed", "expected": [] }
+  ],
+
+  "agreements": [
+    { "input": "+1 Claude", "expected": ["Claude"] },
+    { "input": "+1 codex and +1 Kimi", "expected": ["codex", "Kimi"] },
+    { "input": "I agree", "expected": [] },
+    { "input": "+1 GEMINI great idea", "expected": ["GEMINI"] }
+  ],
+
+  "handoffs": [
+    {
+      "input": "[HANDOFF:claude] Fix the bug",
+      "expected": [{ "agent": "claude", "context": "Fix the bug" }]
+    },
+    {
+      "input": "[HANDOFF:codex] Task 1. [HANDOFF:kimi] Task 2",
+      "expected": [
+        { "agent": "codex", "context": "Task 1" },
+        { "agent": "kimi", "context": "Task 2" }
+      ]
+    },
+    {
+      "input": "[handoff:Gemini] lowercase tag",
+      "expected": [{ "agent": "Gemini", "context": "lowercase tag" }]
+    },
+    {
+      "input": "No handoffs here",
+      "expected": []
+    }
+  ],
+
+  "statuses": [
+    { "input": "[EXPLORE] Checking options", "expected": ["EXPLORE"] },
+    { "input": "[decision] We go with A", "expected": ["decision"] },
+    { "input": "[BLOCKED] Need input", "expected": ["BLOCKED"] },
+    { "input": "[DONE] Task complete", "expected": ["DONE"] },
+    { "input": "[TODO] Next step", "expected": ["TODO"] },
+    { "input": "[QUESTION] What about X?", "expected": ["QUESTION"] },
+    { "input": "[STATUS: READY] Standing by", "expected": ["READY"] },
+    { "input": "[STATUS: in progress] Still working", "expected": ["in progress"] },
+    {
+      "input": "[EXPLORE] Checked options. [DECISION] Going with Plan A",
+      "expected": ["EXPLORE", "DECISION"]
+    },
+    { "input": "No statuses here", "expected": [] }
+  ]
+}

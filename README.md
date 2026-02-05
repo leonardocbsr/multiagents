@@ -30,6 +30,8 @@ cd web && pnpm install          # Frontend dependencies
 ./start.sh                      # Run both
 ```
 
+For a step-by-step walkthrough of creating your first session, understanding the UI layout, and using agent coordination patterns, see the **[Quickstart Tutorial](./docs/quickstart.md)**.
+
 ## Technology Stack
 
 ### Backend

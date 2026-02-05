@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# multiagents-cards — CLI tool for agents to query and create Kanban cards
+# Uses the REST API so agents don't need to wait for chat rounds.
+#
+# Usage:
+#   multiagents-cards list [--status STATUS] [--assignee AGENT] [--role ROLE]
+#   multiagents-cards get CARD_ID
+#   multiagents-cards create --title "..." --description "..." [--coordinator AGENT] [--planner AGENT] [--implementer AGENT] [--reviewer AGENT]
+#   multiagents-cards update CARD_ID [--title "..."] [--description "..."] [--status STATUS] [--coordinator AGENT] [--planner AGENT] [--implementer AGENT] [--reviewer AGENT]
+#   multiagents-cards delete CARD_ID
+#   multiagents-cards my-cards AGENT_NAME
+#
+# Environment:
+#   MULTIAGENTS_URL      Base URL (default: http://localhost:8421)
+#   MULTIAGENTS_SESSION  Session ID (alternative to --session flag)
+
+set -euo pipefail
+
+BASE_URL="${MULTIAGENTS_URL:-http://localhost:8421}"
+SESSION_ID="${MULTIAGENTS_SESSION:-}"
+PRETTY=false
+
+usage() {
+  cat <<'EOF'
+Usage: multiagents-cards [--session ID] [--pretty] <command> [args]
+
+Commands:
+  list   [--status STATUS] [--assignee AGENT] [--role ROLE]
+  get    CARD_ID
+  create --title "..." --description "..." [--coordinator A] [--planner A] [--implementer A] [--reviewer A]
+  update CARD_ID [--title "..."] [--description "..."] [--status STATUS] [--coordinator A] [--planner A] [--implementer A] [--reviewer A]
+  delete CARD_ID
+  my-cards AGENT_NAME
+
+Environment:
+  MULTIAGENTS_URL      Base URL (default: http://localhost:8421)
+  MULTIAGENTS_SESSION  Session ID (alternative to --session)
+EOF
+  exit 1
+}
+
+die() { echo "Error: $*" >&2; exit 1; }
+
+urlencode() {
+  python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
+}
+
+format_output() {
+  if command -v jq &>/dev/null && [ "$PRETTY" = true ]; then
+    jq .
+  else
+    cat
+  fi
+}
+
+require_jq() {
+  command -v jq &>/dev/null || die "jq is required for JSON construction. Install it: brew install jq"
+}
+
+# Parse global flags
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session) SESSION_ID="$2"; shift 2 ;;
+    --pretty) PRETTY=true; shift ;;
+    --help|-h) usage ;;
+    -*) break ;;  # Let command-specific flags through
+    *) break ;;
+  esac
+done
+
+[ -z "$SESSION_ID" ] && die "No session ID. Set MULTIAGENTS_SESSION or use --session ID"
+[ $# -eq 0 ] && usage
+
+API="${BASE_URL}/api/sessions/${SESSION_ID}/cards"
+COMMAND="$1"; shift
+
+case "$COMMAND" in
+  list)
+    PARAMS=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --status) PARAMS="${PARAMS:+$PARAMS&}status=$(urlencode "$2")"; shift 2 ;;
+        --assignee) PARAMS="${PARAMS:+$PARAMS&}assignee=$(urlencode "$2")"; shift 2 ;;
+        --role) PARAMS="${PARAMS:+$PARAMS&}role=$(urlencode "$2")"; shift 2 ;;
+        *) die "Unknown flag: $1" ;;
+      esac
+    done
+    URL="$API"
+    [ -n "$PARAMS" ] && URL="${URL}?${PARAMS}"
+    curl -sf "$URL" | format_output
+    ;;
+
+  get)
+    [ $# -lt 1 ] && die "Usage: multiagents-cards get CARD_ID"
+    curl -sf "${API}/$1" | format_output
+    ;;
+
+  create)
+    require_jq
+    TITLE="" DESC="" COORDINATOR="" PLANNER="" IMPLEMENTER="" REVIEWER=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --title) TITLE="$2"; shift 2 ;;
+        --description) DESC="$2"; shift 2 ;;
+        --coordinator) COORDINATOR="$2"; shift 2 ;;
+        --planner) PLANNER="$2"; shift 2 ;;
+        --implementer) IMPLEMENTER="$2"; shift 2 ;;
+        --reviewer) REVIEWER="$2"; shift 2 ;;
+        *) die "Unknown flag: $1" ;;
+      esac
+    done
+    [ -z "$TITLE" ] && die "--title is required"
+    [ -z "$DESC" ] && die "--description is required"
+    BODY=$(jq -n \
+      --arg title "$TITLE" \
+      --arg desc "$DESC" \
+      --arg coordinator "$COORDINATOR" \
+      --arg planner "$PLANNER" \
+      --arg implementer "$IMPLEMENTER" \
+      --arg reviewer "$REVIEWER" \
+      '{title: $title, description: $desc, coordinator: $coordinator, planner: $planner, implementer: $implementer, reviewer: $reviewer}')
+    curl -sf -X POST -H "Content-Type: application/json" -d "$BODY" "$API" | format_output
+    ;;
+
+  update)
+    require_jq
+    [ $# -lt 1 ] && die "Usage: multiagents-cards update CARD_ID [--field value ...]"
+    CARD_ID="$1"; shift
+    BODY='{}'
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --title|--description|--status|--coordinator|--planner|--implementer|--reviewer)
+          KEY="${1#--}"
+          BODY=$(echo "$BODY" | jq --arg k "$KEY" --arg v "$2" '. + {($k): $v}')
+          shift 2 ;;
+        *) die "Unknown flag: $1" ;;
+      esac
+    done
+    curl -sf -X PATCH -H "Content-Type: application/json" -d "$BODY" "${API}/${CARD_ID}" | format_output
+    ;;
+
+  delete)
+    [ $# -lt 1 ] && die "Usage: multiagents-cards delete CARD_ID"
+    curl -sf -X DELETE "${API}/$1" | format_output
+    ;;
+
+  my-cards)
+    [ $# -lt 1 ] && die "Usage: multiagents-cards my-cards AGENT_NAME"
+    curl -sf "${API}?assignee=$(urlencode "$1")" | format_output
+    ;;
+
+  *)
+    die "Unknown command: $COMMAND"
+    ;;
+esac

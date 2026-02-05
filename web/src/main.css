@@ -1,0 +1,786 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --ui-radius-sm: 0.375rem;
+    --ui-radius-md: 0.5rem;
+    --ui-radius-lg: 0.75rem;
+    --ui-ring: #3B82F6;
+    --accent-400: #60A5FA;
+    --accent-500: #3B82F6;
+    --accent-600: #2563EB;
+    --overlay-backdrop: rgba(0, 0, 0, 0.6);
+    --shadow-modal: 0 28px 80px rgba(0, 0, 0, 0.58), 0 8px 24px rgba(0, 0, 0, 0.42);
+
+    /* Mission-control dark palette — exact prototype values */
+    --color-zinc-50: #F9FAFB;
+    --color-zinc-100: #E5E7EB;
+    --color-zinc-200: #D1D5DB;
+    --color-zinc-300: #C9CDD5;
+    --color-zinc-400: #9CA3AF;
+    --color-zinc-500: #6B7280;
+    --color-zinc-600: #4B5563;
+    --color-zinc-700: #2A3040;
+    --color-zinc-800: #1A1F2A;
+    --color-zinc-900: #13161C;
+    --color-zinc-950: #0B0E13;
+
+    /* Borders — separate from zinc so we can fine-tune */
+    --border-subtle: #1D2430;
+    --border-medium: #252D3A;
+    --border-active: #323C4F;
+    --border-code: #2D3749;
+    --border-dashed: #2C3443;
+
+    /* Semantic backgrounds for inline style use */
+    --bg-canvas: #0B0E13;
+    --bg-surface: #0F141D;
+    --bg-card: #171C26;
+    --bg-soft: #1A1F2A;
+    --bg-active: var(--color-zinc-800);
+    --bg-knob: #D1D5DB;
+
+    /* Semantic text */
+    --text-strong: #E5E7EB;
+    --text-default: #D1D5DB;
+    --text-muted: #9CA3AF;
+    --text-subtle: #6B7280;
+    --text-faint: #4B5563;
+    --text-on-solid: #F9FAFB;
+
+    /* Agent identity colors */
+    --agent-claude: #E8927C;
+    --agent-codex: #7CE8B4;
+    --agent-kimi: #C89CFF;
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --color-zinc-50: #FAFAFA;
+    --color-zinc-100: #F4F4F5;
+    --color-zinc-200: #E4E4E7;
+    --color-zinc-300: #D4D4D8;
+    --color-zinc-400: #A1A1AA;
+    --color-zinc-500: #71717A;
+    --color-zinc-600: #52525B;
+    --color-zinc-700: #3F3F46;
+    --color-zinc-800: #27272A;
+    --color-zinc-900: #18181B;
+    --color-zinc-950: #09090B;
+    --border-subtle: #E4E4E7;
+    --border-medium: #D4D4D8;
+    --border-active: #A1A1AA;
+    --border-code: #D4D4D8;
+    --border-dashed: #D4D4D8;
+    --bg-canvas: #F4F6FA;
+    --bg-surface: #FCFDFE;
+    --bg-card: #FFFFFF;
+    --bg-soft: #EEF1F6;
+    --bg-active: #E8ECF3;
+    --bg-knob: #111827;
+    --overlay-backdrop: rgba(15, 23, 42, 0.28);
+    --shadow-modal: 0 24px 64px rgba(15, 23, 42, 0.18), 0 6px 18px rgba(15, 23, 42, 0.14);
+
+    --text-strong: #111827;
+    --text-default: #1F2937;
+    --text-muted: #4B5563;
+    --text-subtle: #6B7280;
+    --text-faint: #9CA3AF;
+    --text-on-solid: #FFFFFF;
+  }
+
+  :root[data-accent="cyan"] {
+    --accent-400: #60A5FA;
+    --accent-500: #3B82F6;
+    --accent-600: #2563EB;
+    --ui-ring: #3B82F6;
+  }
+
+  :root[data-accent="emerald"] {
+    --accent-400: #34D399;
+    --accent-500: #10B981;
+    --accent-600: #059669;
+    --ui-ring: #10B981;
+  }
+
+  :root[data-accent="amber"] {
+    --accent-400: #FBBF24;
+    --accent-500: #F59E0B;
+    --accent-600: #D97706;
+    --ui-ring: #F59E0B;
+  }
+
+  :root[data-density="compact"] {
+    --ui-density-font: 0.95;
+    --ui-density-space: 0.9;
+  }
+
+  :root[data-density="cozy"] {
+    --ui-density-font: 1;
+    --ui-density-space: 1;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: calc(14px * var(--ui-density-font, 1));
+    background: var(--bg-canvas);
+    color: var(--text-default);
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--ui-ring);
+    outline-offset: 2px;
+  }
+
+  /* Scrollbar — thin, matching dark theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-medium);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-active);
+  }
+}
+
+@layer components {
+  /* ── Text tokens ── */
+  .text-ui-strong { color: var(--text-strong); }
+  .text-ui { color: var(--text-default); }
+  .text-ui-muted { color: var(--text-muted); }
+  .text-ui-subtle { color: var(--text-subtle); }
+  .text-ui-faint { color: var(--text-faint); }
+  .text-ui-accent { color: var(--accent-400); }
+  .text-ui-danger { color: #EF4444; }
+  .text-ui-warn { color: #F59E0B; }
+  .text-ui-success { color: #34D399; }
+  .text-ui-info { color: var(--accent-400); }
+  .text-ui-violet { color: #C89CFF; }
+  .text-ui-on-solid { color: var(--text-on-solid); }
+
+  /* ── Border tokens ── */
+  .border-ui { border-color: var(--border-medium); }
+  .border-ui-strong { border-color: var(--border-active); }
+  .border-ui-soft { border-color: var(--border-subtle); }
+  .border-ui-dashed { border-color: var(--border-dashed); }
+  .divide-ui-soft > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--border-subtle);
+  }
+
+  /* ── Background tokens ── */
+  .bg-ui-canvas { background-color: var(--bg-canvas); }
+  .bg-ui-surface { background-color: var(--bg-surface); }
+  .bg-ui-elevated { background-color: var(--bg-card); }
+  .bg-ui-soft { background-color: var(--bg-soft); }
+  .bg-ui-hover:hover { background-color: var(--bg-soft); }
+  .bg-ui-knob { background-color: var(--bg-knob); }
+
+  /* Semantic soft backgrounds */
+  .bg-ui-danger-soft { background-color: #EF444422; }
+  .bg-ui-success-soft { background-color: #10B98122; }
+  .bg-ui-warn-soft { background-color: #F59E0B22; }
+  .bg-ui-info-soft { background-color: color-mix(in srgb, var(--accent-500) 14%, transparent); }
+  .bg-ui-violet-soft { background-color: #C89CFF22; }
+
+  .border-ui-danger-soft { border-color: #EF444444; }
+  .border-ui-success-soft { border-color: #10B98144; }
+  .border-ui-warn-soft { border-color: #F59E0B44; }
+  .border-ui-info-soft { border-color: color-mix(in srgb, var(--accent-500) 26%, transparent); }
+  .border-ui-violet-soft { border-color: #C89CFF44; }
+
+  /* ── Status dots ── */
+  .dot-status-idle { color: var(--text-subtle); background-color: var(--text-subtle); }
+  .dot-status-done { color: var(--text-muted); background-color: var(--text-muted); }
+  .dot-status-streaming { color: #34D399; background-color: #34D399; }
+  .dot-status-failed { color: #EF4444; background-color: #EF4444; }
+  .dot-status-warn { color: #F59E0B; background-color: #F59E0B; }
+
+  .status-pill-idle {
+    background-color: color-mix(in srgb, var(--text-subtle) 16%, transparent);
+    border-color: color-mix(in srgb, var(--text-subtle) 36%, transparent);
+  }
+  .status-pill-done {
+    background-color: color-mix(in srgb, var(--text-muted) 16%, transparent);
+    border-color: color-mix(in srgb, var(--text-muted) 34%, transparent);
+  }
+  .status-pill-streaming {
+    background-color: #166534;
+    border-color: #22C55E;
+  }
+  .status-pill-failed {
+    background-color: #991B1B;
+    border-color: #EF4444;
+  }
+
+  .text-status-idle { color: var(--text-subtle); }
+  .text-status-done { color: var(--text-muted); }
+  .text-status-streaming { color: #34D399; }
+  .text-status-failed { color: #EF4444; }
+
+  /* ── Agent identity — coral, green, purple ── */
+  .agent-color-claude { color: var(--agent-claude); }
+  .agent-color-kimi { color: var(--agent-kimi); }
+  .agent-color-codex { color: var(--agent-codex); }
+  .agent-dot-claude { background-color: var(--agent-claude); }
+  .agent-dot-kimi { background-color: var(--agent-kimi); }
+  .agent-dot-codex { background-color: var(--agent-codex); }
+
+  /* Agent avatar tinted backgrounds — 9% fill, 33% border (matching prototype 18/55 hex alpha) */
+  .agent-avatar-claude {
+    background: color-mix(in srgb, var(--agent-claude) 9%, transparent);
+    border-color: color-mix(in srgb, var(--agent-claude) 33%, transparent);
+  }
+  .agent-avatar-codex {
+    background: color-mix(in srgb, var(--agent-codex) 9%, transparent);
+    border-color: color-mix(in srgb, var(--agent-codex) 33%, transparent);
+  }
+  .agent-avatar-kimi {
+    background: color-mix(in srgb, var(--agent-kimi) 9%, transparent);
+    border-color: color-mix(in srgb, var(--agent-kimi) 33%, transparent);
+  }
+
+  /* Agent border accents for message cards — 60% opacity per prototype */
+  .agent-border-claude { border-left-color: color-mix(in srgb, var(--agent-claude) 60%, transparent); }
+  .agent-border-codex { border-left-color: color-mix(in srgb, var(--agent-codex) 60%, transparent); }
+  .agent-border-kimi { border-left-color: color-mix(in srgb, var(--agent-kimi) 60%, transparent); }
+
+  /* ── Badges ── */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium font-mono border;
+  }
+  .badge-neutral {
+    color: var(--text-muted);
+    background-color: var(--bg-soft);
+    border-color: var(--border-medium);
+  }
+  .badge-accent {
+    color: var(--accent-400);
+    background-color: color-mix(in srgb, var(--accent-500) 14%, transparent);
+    border-color: color-mix(in srgb, var(--accent-500) 26%, transparent);
+  }
+  .badge-success {
+    color: #34D399;
+    background-color: #10B98122;
+    border-color: #10B98144;
+  }
+  .badge-warn {
+    color: #F59E0B;
+    background-color: #F59E0B22;
+    border-color: #F59E0B44;
+  }
+  .badge-danger {
+    color: #EF4444;
+    background-color: #EF444422;
+    border-color: #EF444444;
+  }
+  .badge-violet {
+    color: #C89CFF;
+    background-color: #C89CFF22;
+    border-color: #C89CFF44;
+  }
+  .badge-cyan {
+    color: #67E8F9;
+    background-color: #06B6D422;
+    border-color: #06B6D444;
+  }
+  .badge-info {
+    color: var(--accent-400);
+    background-color: color-mix(in srgb, var(--accent-500) 14%, transparent);
+    border-color: color-mix(in srgb, var(--accent-500) 26%, transparent);
+  }
+  /* Type badges for messages — shared (blue), responded (green) */
+  .badge-shared {
+    color: var(--accent-400);
+    background-color: color-mix(in srgb, var(--accent-500) 14%, transparent);
+    border-color: transparent;
+  }
+  .badge-responded {
+    color: #34D399;
+    background-color: #10B98122;
+    border-color: transparent;
+  }
+
+  .surface-warn {
+    border-color: #F59E0B44;
+    background-color: #F59E0B11;
+  }
+
+  /* ── Buttons ── */
+  .btn-ui-success {
+    color: #D1FAE5;
+    background-color: #10B98133;
+  }
+  .btn-ui-success:hover { background-color: #10B98144; }
+  .btn-ui-danger {
+    color: #FECACA;
+    background-color: #EF444433;
+  }
+  .btn-ui-danger:hover { background-color: #EF444444; }
+  .btn-ui-info {
+    color: var(--accent-400);
+    background-color: color-mix(in srgb, var(--accent-500) 20%, transparent);
+  }
+  .btn-ui-info:hover { background-color: color-mix(in srgb, var(--accent-500) 28%, transparent); }
+
+  /* ── Card primitive ── */
+  .ui-card {
+    @apply border rounded-lg;
+    background-color: var(--bg-card);
+    border-color: var(--border-medium);
+  }
+  .ui-card-header {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .ui-card-content {
+    min-width: 0;
+  }
+  .ui-card-footer {
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  /* ── Share card ── */
+  .share-card {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--bg-card);
+    border-color: var(--border-medium);
+  }
+  .share-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--share-rail-color, color-mix(in srgb, var(--agent-codex) 65%, transparent));
+    opacity: 0.8;
+    pointer-events: none;
+  }
+  .chat-bubble-agent .surface-share-header {
+    display: none;
+  }
+  .surface-share-header {
+    border-color: var(--border-subtle);
+    background-color: transparent;
+  }
+  .text-share { color: var(--text-muted); }
+  .text-share-body { color: var(--text-default); }
+  .share-card-footer {
+    background-color: transparent;
+  }
+  .share-card-content {
+    font-family: var(--font-sans);
+    font-size: calc(12px * var(--ui-density-font, 1));
+    line-height: 1.55;
+    font-weight: 450;
+    letter-spacing: 0;
+  }
+  .share-card,
+  .share-card * {
+    font-family: var(--font-sans);
+  }
+  .share-card .badge {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .share-card .share-status-badge {
+    padding: 1px 8px;
+    border-radius: 7px;
+    font-size: 10px;
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    margin-right: 4px;
+    background-color: #3341553a;
+    border-color: #47556988;
+    color: #cbd5e1;
+  }
+  .share-card .share-status-badge.badge-neutral {
+    color: #cbd5e1;
+    background-color: #3341553a;
+    border-color: #47556988;
+  }
+  .share-card .share-status-badge.badge-info {
+    color: #BFDBFE;
+    background-color: #1D4ED838;
+    border-color: #1D4ED877;
+  }
+  .share-card .share-status-badge.badge-success {
+    color: #BBF7D0;
+    background-color: #16653438;
+    border-color: #16653477;
+  }
+  .share-card .share-status-badge.badge-warn {
+    color: #FDE68A;
+    background-color: #92400E38;
+    border-color: #92400E77;
+  }
+  .share-card .share-status-badge.badge-danger {
+    color: #FECACA;
+    background-color: #991B1B38;
+    border-color: #991B1B77;
+  }
+  .share-card .share-status-badge.badge-violet {
+    color: #E9D5FF;
+    background-color: #5B21B638;
+    border-color: #5B21B677;
+  }
+  .share-card .share-status-badge.badge-cyan {
+    color: #CFFAFE;
+    background-color: #155E7538;
+    border-color: #155E7577;
+  }
+  .share-card code,
+  .share-card pre,
+  .share-card pre code {
+    font-family: var(--font-mono);
+  }
+  .share-card-content p,
+  .share-card-content li {
+    color: inherit;
+  }
+
+  /* ── Utility ── */
+  .fade-edge-right {
+    background: linear-gradient(to left, var(--bg-canvas), transparent);
+  }
+  .fade-edge-left {
+    background: linear-gradient(to right, var(--bg-canvas), transparent);
+  }
+  .overlay-backdrop {
+    background-color: var(--overlay-backdrop);
+  }
+  .ring-ui {
+    box-shadow: 0 0 0 1px var(--ui-ring);
+  }
+  .ui-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* ── Markdown blocks ── */
+  .md-block {
+    @apply rounded-md border px-2.5 py-2 text-xs break-words;
+  }
+  .md-tag-system {
+    color: #67E8F9;
+    background-color: #06B6D411;
+    border-color: #06B6D433;
+  }
+  .md-tag-thinking {
+    color: #C89CFF;
+    background-color: #C89CFF11;
+    border-color: #C89CFF33;
+  }
+  .md-tag-result {
+    color: #34D399;
+    background-color: #10B98111;
+    border-color: #10B98133;
+  }
+  .md-tag-error {
+    color: #FCA5A5;
+    background-color: #EF444411;
+    border-color: #EF444433;
+  }
+  .md-tag-tool {
+    color: #FCD34D;
+    background-color: #F59E0B11;
+    border-color: #F59E0B33;
+  }
+  .md-tag-search {
+    color: #60A5FA;
+    background-color: #3B82F611;
+    border-color: #3B82F633;
+  }
+  .md-tag-artifact {
+    color: #A78BFA;
+    background-color: #7C3AED11;
+    border-color: #7C3AED33;
+  }
+  .md-tag-output {
+    color: var(--text-muted);
+    background-color: var(--bg-soft);
+    border-color: var(--border-medium);
+  }
+
+  /* ── Modal — flat opaque, no blur ── */
+  .ui-modal {
+    @apply border rounded-xl;
+    background-color: var(--bg-surface);
+    border-color: var(--border-medium);
+  }
+
+  /* ── Panel — flat opaque, no blur ── */
+  .ui-panel {
+    @apply border rounded-lg;
+    background-color: var(--bg-card);
+    border-color: var(--border-medium);
+  }
+
+  /* ── Field input ── */
+  .ui-field {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-medium);
+    border-radius: 0.375rem;
+    color: var(--text-default);
+  }
+  .ui-field::placeholder { color: var(--text-subtle); }
+  .ui-field:focus {
+    outline: none;
+    border-color: var(--border-active);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-ring) 35%, transparent);
+  }
+
+  /* ── Buttons ── */
+  .ui-btn,
+  .ui-btn-primary,
+  .ui-btn-secondary,
+  .ui-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-md text-sm transition-colors;
+    padding: calc(0.5rem * var(--ui-density-space, 1)) calc(0.75rem * var(--ui-density-space, 1));
+  }
+
+  .ui-btn-primary {
+    background-color: var(--accent-500);
+    color: var(--text-on-solid);
+  }
+  .ui-btn-primary:hover { background-color: var(--accent-600); }
+
+  .ui-btn-secondary {
+    background-color: var(--bg-card);
+    color: var(--text-strong);
+    border: 1px solid var(--border-medium);
+  }
+  .ui-btn-secondary:hover { background-color: var(--bg-soft); }
+
+  .ui-btn-ghost {
+    color: var(--text-muted);
+  }
+  .ui-btn-ghost:hover {
+    color: var(--text-strong);
+    background-color: var(--bg-soft);
+  }
+
+  /* ── Tabs ── */
+  .ui-tab-active,
+  .ui-tab-inactive {
+    @apply px-3 py-1.5 rounded text-xs transition-colors;
+  }
+
+  .ui-tab-active {
+    background-color: var(--bg-soft);
+    color: var(--text-strong);
+  }
+
+  .ui-tab-inactive {
+    color: var(--text-subtle);
+  }
+  .ui-tab-inactive:hover { color: var(--text-default); }
+
+  /* ── Chat avatar ── */
+  .chat-avatar {
+    @apply w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-medium;
+    border: 1.5px solid var(--border-medium);
+    background: var(--bg-card);
+  }
+
+  /* ── Chat bubbles ── */
+  .chat-bubble-user,
+  .chat-bubble-agent,
+  .chat-bubble-system {
+    border-radius: 12px;
+    border: 1px solid var(--border-medium);
+  }
+
+  .chat-bubble-user {
+    color: var(--text-strong);
+    background: var(--bg-card);
+    padding: 12px 16px;
+  }
+
+  .chat-bubble-agent {
+    color: var(--text-default);
+    background: var(--bg-card);
+    border-color: var(--border-medium);
+    padding: 16px 20px;
+  }
+
+  .chat-bubble-system {
+    color: #FCD34D;
+    background: #F59E0B0A;
+    border-color: #F59E0B33;
+    padding: 12px 16px;
+  }
+
+  /* ── Logo ── */
+  .logo-icon-gradient {
+    background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--agent-claude) 26%, var(--bg-card)),
+      color-mix(in srgb, var(--agent-codex) 26%, var(--bg-card)),
+      color-mix(in srgb, var(--agent-kimi) 26%, var(--bg-card))
+    );
+    border: 1px solid var(--border-medium);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-active) 35%, transparent);
+    border-radius: 10px;
+    width: 30px;
+    height: 30px;
+  }
+
+  /* ── Filter pills ── */
+  .filter-pill {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium font-mono border transition-all cursor-pointer;
+  }
+  .filter-pill-active {
+    background-color: var(--bg-soft);
+    border-color: var(--border-active);
+    color: var(--text-strong);
+  }
+  .filter-pill-inactive {
+    background-color: transparent;
+    border-color: transparent;
+    color: var(--text-subtle);
+  }
+  .filter-pill-inactive:hover {
+    color: var(--text-default);
+  }
+
+  /* ── Agent pill glow animation ── */
+  @keyframes agent-glow {
+    0%, 100% { box-shadow: 0 0 4px 0 var(--agent-glow-color, transparent); }
+    50% { box-shadow: 0 0 10px 2px var(--agent-glow-color, transparent); }
+  }
+  .agent-pill-glow {
+    animation: agent-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes status-breathe-soft {
+    0%, 100% {
+      transform: scale(0.68);
+      opacity: 0.45;
+    }
+    50% {
+      transform: scale(1.02);
+      opacity: 0.88;
+    }
+  }
+  @keyframes status-streaming-blink {
+    0%, 45% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    46%, 100% {
+      transform: scale(1);
+      opacity: 0.12;
+    }
+  }
+  @keyframes status-breathe-failed {
+    0%, 100% {
+      transform: scale(0.52);
+      opacity: 0.35;
+    }
+    50% {
+      transform: scale(1.12);
+      opacity: 1;
+    }
+  }
+
+  .status-breathe-idle {
+    animation: status-breathe-soft 3s ease-in-out infinite;
+    will-change: transform, opacity;
+    transform-origin: center;
+  }
+  .status-breathe-done {
+    animation: status-breathe-soft 2.7s ease-in-out infinite;
+    will-change: transform, opacity;
+    transform-origin: center;
+  }
+  .status-breathe-streaming {
+    animation: status-streaming-blink 0.45s steps(1, end) infinite;
+    will-change: transform, opacity;
+    transform-origin: center;
+  }
+  .status-breathe-failed {
+    animation: none;
+    will-change: transform, opacity;
+    transform-origin: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .status-breathe-idle,
+    .status-breathe-done,
+    .status-breathe-streaming,
+    .status-breathe-failed {
+      animation: none;
+    }
+  }
+}
+
+@layer components {
+  /* Make markdown readable in both modes, including existing prose-invert usage. */
+  .prose {
+    --tw-prose-body: var(--text-default);
+    --tw-prose-headings: var(--text-strong);
+    --tw-prose-links: var(--accent-500);
+    --tw-prose-bold: var(--text-strong);
+    --tw-prose-counters: var(--text-subtle);
+    --tw-prose-bullets: var(--text-subtle);
+    --tw-prose-hr: var(--border-subtle);
+    --tw-prose-quotes: var(--text-muted);
+    --tw-prose-quote-borders: var(--border-medium);
+    --tw-prose-captions: var(--text-subtle);
+    --tw-prose-code: var(--text-strong);
+    --tw-prose-pre-code: var(--text-default);
+    --tw-prose-pre-bg: var(--bg-soft);
+    --tw-prose-th-borders: var(--border-medium);
+    --tw-prose-td-borders: var(--border-subtle);
+    --tw-prose-invert-body: var(--text-default);
+    --tw-prose-invert-headings: var(--text-strong);
+    --tw-prose-invert-links: var(--accent-400);
+    --tw-prose-invert-bold: var(--text-strong);
+    --tw-prose-invert-counters: var(--text-subtle);
+    --tw-prose-invert-bullets: var(--text-subtle);
+    --tw-prose-invert-hr: var(--border-subtle);
+    --tw-prose-invert-quotes: var(--text-muted);
+    --tw-prose-invert-quote-borders: var(--border-medium);
+    --tw-prose-invert-captions: var(--text-subtle);
+    --tw-prose-invert-code: var(--text-strong);
+    --tw-prose-invert-pre-code: var(--text-default);
+    --tw-prose-invert-pre-bg: var(--bg-soft);
+    --tw-prose-invert-th-borders: var(--border-medium);
+    --tw-prose-invert-td-borders: var(--border-subtle);
+  }
+}
+
+/* ── Animations ── */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up { animation: slide-up 0.3s ease-out; }
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in-left { animation: slide-in-left 0.2s ease-out; }

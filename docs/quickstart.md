@@ -42,14 +42,16 @@ To customize which agents participate:
 
 When the app loads, you'll see the **session picker** — a list of previous sessions (if any) and a "New Chat" button.
 
-<!-- TODO: screenshot of session picker -->
+![Session picker](images/session-picker.png)
 
 Click **New Chat**. You'll be prompted to:
 
 1. **Pick a working directory** — the folder agents will operate in. Each agent gets its own isolated temp directory, but uses absolute paths to read/write files in your project.
 2. **Select agents** — check which agents to include. You can also add multiple instances of the same model with different personas (e.g., "Claude as Architect" and "Claude as Reviewer").
 
-<!-- TODO: screenshot of agent roster selection -->
+![Folder picker](images/folder-picker.png)
+
+![Agent roster editor](images/roster-editor.png)
 
 ## 4. Send your first message
 
@@ -64,7 +66,7 @@ What happens next:
 3. **Round ends** — once every agent has finished responding, the round is complete.
 4. **Next round** — agents can now respond to each other. This continues until all agents signal `[PASS]`, meaning they have nothing more to add.
 
-<!-- TODO: screenshot of agents streaming responses -->
+![Chat layout with agent panels](images/chat-layout.png)
 
 ## 5. Understand the layout
 
@@ -90,7 +92,7 @@ The UI has a three-panel split layout:
 
 You can toggle panels and resize them using the layout controls in the header.
 
-<!-- TODO: screenshot of the three-panel layout -->
+![Split layout with agent streams and shared chat](images/chat-layout.png)
 
 ## 6. How rounds and passing work
 
@@ -151,7 +153,7 @@ Click the **gear icon** in the header to open the settings modal. You can adjust
 
 Settings changes apply to the current session immediately.
 
-<!-- TODO: screenshot of settings modal -->
+![Settings modal](images/settings-modal.png)
 
 ## 9. Session persistence
 

@@ -1,11 +1,27 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { ArrowDown } from "lucide-react";
-import { AgentIcon, AGENT_COLORS, AGENT_BG_COLORS } from "./AgentIcons";
+import { User } from "lucide-react";
+import { AgentIcon, AGENT_AVATAR_CLASSES, AGENT_COLORS } from "./AgentIcons";
 import StyledMarkdown from "./StyledMarkdown";
 import type { AppState, AgentInfo, Message } from "../types";
+import { Button, Card, CardContent, CardFooter, CardHeader } from "./ui";
+import AgentMessageCard from "./AgentMessageCard";
+import AgentStatusBar from "./AgentStatusBar";
 
 const SHARE_TAG_PATTERN = /<Share>(.*?)<\/Share>/is;
 const THINKING_BLOCK_RE = /<(?:thinking|antThinking)>[\s\S]*?<\/(?:thinking|antThinking)>/gi;
+const STATUS_TAG_RE_GLOBAL = /(?:\[(EXPLORE|DECISION|BLOCKED|DONE|TODO|QUESTION)\]|\[STATUS:\s*([^\]\n]+)\])/gi;
+const STATUS_COLORS: Record<string, string> = {
+  EXPLORE: "badge-info",
+  DECISION: "badge-success",
+  BLOCKED: "badge-danger",
+  DONE: "badge-success",
+  TODO: "badge-warn",
+  QUESTION: "badge-violet",
+  READY: "badge-cyan",
+  "IN PROGRESS": "badge-info",
+};
+const DEFAULT_STATUS_COLOR = "badge-info";
 
 /** Strip thinking blocks so a <Share> accidentally opened inside one doesn't swallow everything. */
 function stripThinking(content: string): string {
@@ -23,23 +39,46 @@ function extractShareOnly(content: string): string {
   return matches.map((m) => m[1].trim()).filter(Boolean).join("\n\n");
 }
 
+function normalizeStatus(status: string): string {
+  return status.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+function extractStatuses(text: string): string[] {
+  STATUS_TAG_RE_GLOBAL.lastIndex = 0;
+  const found: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = STATUS_TAG_RE_GLOBAL.exec(text)) !== null) {
+    found.push(normalizeStatus(match[1] ?? match[2] ?? ""));
+  }
+  return found;
+}
+
+function stripStatusTags(text: string): string {
+  STATUS_TAG_RE_GLOBAL.lastIndex = 0;
+  return text
+    .replace(STATUS_TAG_RE_GLOBAL, "")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/^\n+/, "")
+    .trim();
+}
+
 interface SharedEntry {
-  kind: "user" | "shared" | "passed" | "responded" | "round";
+  kind: "user" | "shared" | "passed" | "responded" | "passed-group";
   message?: Message;
   agent?: string;
-  round?: number;
+  agents?: string[];
+  groupKey?: string;
+}
+
+function entryKey(entry: SharedEntry): string | null {
+  if (entry.kind === "passed-group") return entry.groupKey ?? null;
+  return entry.message?.id ?? null;
 }
 
 function buildSharedEntries(messages: Message[]): SharedEntry[] {
   const entries: SharedEntry[] = [];
-  let lastRound = 0;
 
   for (const msg of messages) {
-    if (msg.round_number && msg.round_number > lastRound) {
-      lastRound = msg.round_number;
-      entries.push({ kind: "round", round: msg.round_number });
-    }
-
     if (msg.role === "user") {
       entries.push({ kind: "user", message: msg });
     } else if (msg.role === "system" || msg.role === "error") {
@@ -55,20 +94,104 @@ function buildSharedEntries(messages: Message[]): SharedEntry[] {
   return entries;
 }
 
+function collapseConsecutivePasses(entries: SharedEntry[]): SharedEntry[] {
+  const result: SharedEntry[] = [];
+  let passRun: SharedEntry[] = [];
+
+  const flushPasses = () => {
+    if (passRun.length === 0) return;
+    if (passRun.length === 1) {
+      result.push(passRun[0]);
+    } else {
+      const agents = passRun.map((e) => e.agent!);
+      const key = passRun.map((e) => e.message?.id ?? e.agent).join(",");
+      result.push({ kind: "passed-group", agents, groupKey: key });
+    }
+    passRun = [];
+  };
+
+  for (const entry of entries) {
+    if (entry.kind === "passed") {
+      passRun.push(entry);
+    } else {
+      flushPasses();
+      result.push(entry);
+    }
+  }
+  flushPasses();
+  return result;
+}
+
+function PassMarker({
+  agents,
+  stateAgents,
+}: {
+  agents: string[];
+  stateAgents: AgentInfo[];
+}) {
+  return (
+    <div className="flex items-center gap-3 py-1 opacity-45">
+      <div className="flex-1 border-t border-dashed border-ui-dashed" />
+      <div className="flex items-center gap-1.5">
+        {agents.map((name, idx) => {
+          const aType = resolveAgentInfo(name, stateAgents).type;
+          const color = AGENT_COLORS[aType] ?? "text-ui-muted";
+          return (
+            <div
+              key={`${name}-${idx}`}
+              className="w-5 h-5 rounded-full border border-dashed border-ui-dashed flex items-center justify-center"
+              title={name}
+              aria-label={`${name} passed`}
+              style={{ borderColor: `color-mix(in srgb, var(--agent-${aType}, #6B7280) 66%, transparent)` }}
+            >
+              <span className={`${color} opacity-70`}>
+                <AgentIcon agent={aType} size={9} />
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex-1 border-t border-dashed border-ui-dashed" />
+    </div>
+  );
+}
+
 interface Props {
   state: AppState;
   onExpandAgent?: (agent: string) => void;
+  onStopAgent?: (agent: string) => void;
+  onRemoveAgent?: (name: string) => void;
+  onAddAgent?: (name: string, agentType: string, role: string) => void;
+  density?: "compact" | "comfortable";
 }
 
-function resolveAgentType(agentName: string, agents: AgentInfo[]): string {
+function resolveAgentInfo(agentName: string, agents: AgentInfo[]): { type: string; model?: string | null } {
   const info = agents.find(a => a.name === agentName);
-  return info?.type ?? agentName;
+  return { type: info?.type ?? agentName, model: info?.model ?? null };
 }
 
-export default function SharedChat({ state, onExpandAgent }: Props) {
+function formatTime(msg: Message): string {
+  if (!msg.created_at) return "";
+  try {
+    const d = new Date(msg.created_at);
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  } catch { return ""; }
+}
+
+export default function SharedChat({
+  state,
+  onExpandAgent,
+  onStopAgent,
+  onRemoveAgent,
+  onAddAgent,
+  density = "comfortable",
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [renderLimit, setRenderLimit] = useState(250);
+  const [newEntryKeys, setNewEntryKeys] = useState<Set<string>>(new Set());
+  const prevEntryKeysRef = useRef<string[]>([]);
 
   const checkScroll = useCallback(() => {
     const el = containerRef.current;
@@ -94,6 +217,40 @@ export default function SharedChat({ state, onExpandAgent }: Props) {
   }, []);
 
   const entries = useMemo(() => buildSharedEntries(state.messages), [state.messages]);
+  const lastActivityText = useMemo(() => {
+    if (Object.values(state.agentStatuses).some((s) => s === "streaming")) {
+      return "Last activity now";
+    }
+    let latestTs = 0;
+    for (const msg of state.messages) {
+      const ts = Date.parse(msg.created_at);
+      if (Number.isFinite(ts) && ts > latestTs) latestTs = ts;
+    }
+    if (!latestTs) return "No activity yet";
+    const diffSec = Math.max(0, Math.floor((Date.now() - latestTs) / 1000));
+    if (diffSec < 60) return `Last activity ${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `Last activity ${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `Last activity ${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    return `Last activity ${diffDay}d ago`;
+  }, [state.messages, state.agentStatuses]);
+
+  const collapsedEntries = useMemo(() => collapseConsecutivePasses(entries), [entries]);
+  const hiddenEntries = Math.max(0, collapsedEntries.length - renderLimit);
+  const renderedEntries = hiddenEntries > 0 ? collapsedEntries.slice(-renderLimit) : collapsedEntries;
+
+  useEffect(() => {
+    const keys = collapsedEntries.map(entryKey).filter((k): k is string => Boolean(k));
+    const previous = new Set(prevEntryKeysRef.current);
+    const added = keys.filter((k) => !previous.has(k));
+    prevEntryKeysRef.current = keys;
+    if (added.length === 0) return;
+    setNewEntryKeys(new Set(added));
+    const timer = window.setTimeout(() => setNewEntryKeys(new Set()), 400);
+    return () => window.clearTimeout(timer);
+  }, [collapsedEntries]);
 
   const activeSharedStreams = useMemo(() => {
     const result: { agent: string; content: string }[] = [];
@@ -107,80 +264,191 @@ export default function SharedChat({ state, onExpandAgent }: Props) {
   }, [state.agentStreams, state.agentStatuses]);
 
   return (
-    <div className="relative flex-1 overflow-auto p-3 md:p-4" ref={containerRef}>
-      <div className="max-w-3xl mx-auto space-y-3">
-        {entries.map((entry) => {
-          if (entry.kind === "round") {
+    <div className="relative flex-1 overflow-auto bg-ui-surface" ref={containerRef}>
+      {/* Filter bar */}
+      <div className="sticky top-0 z-10 h-11 border-b border-ui-soft px-4 md:px-6" style={{ background: "var(--bg-surface)" }}>
+        <div className="h-full flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <AgentStatusBar
+              state={state}
+              onStopAgent={onStopAgent}
+              onRemoveAgent={onRemoveAgent}
+              onAddAgent={onAddAgent}
+              className="h-full"
+            />
+          </div>
+          <span className="text-[11px] font-mono text-ui-faint shrink-0 hidden md:inline">
+            {entries.length} events · {lastActivityText}
+          </span>
+        </div>
+      </div>
+
+      <div className={`${density === "compact" ? "space-y-2" : "space-y-3"} px-3 md:px-5 py-3`}>
+        {/* Show older — dashed button in message list */}
+        {hiddenEntries > 0 && (
+          <button
+            onClick={() => setRenderLimit((n) => n + 250)}
+            className="w-full py-2.5 rounded-[10px] text-[12px] font-mono text-ui-faint transition-colors cursor-pointer hover:text-ui-muted"
+            style={{ border: '1px dashed var(--border-dashed)', background: 'transparent' }}
+          >
+            &uarr; Show {hiddenEntries} older events
+          </button>
+        )}
+
+        {renderedEntries.map((entry, i) => {
+          const key = entryKey(entry);
+          const animateClass = key && newEntryKeys.has(key) ? "animate-slide-up" : "";
+          const animateStyle = animateClass
+            ? { animationDelay: `${Math.min(i * 0.04, 0.8)}s`, animationFillMode: "backwards" as const }
+            : undefined;
+
+          if (entry.kind === "user" && entry.message) {
+            const time = formatTime(entry.message);
             return (
-              <div key={`round-${entry.round}`} className="flex items-center gap-3 py-1">
-                <div className="flex-1 border-t border-zinc-800" />
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Round {entry.round}</span>
-                <div className="flex-1 border-t border-zinc-800" />
+              <div
+                key={entry.message.id}
+                className={animateClass}
+                style={animateStyle}
+              >
+                <div className="chat-bubble-agent relative overflow-hidden mx-2 md:mx-3">
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-0 top-0 bottom-0 w-[2px]"
+                    style={{ background: "var(--accent-500)", opacity: 0.6 }}
+                  />
+                  <div className="flex items-center mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="chat-avatar border-ui-info-soft text-ui-info" aria-label="You">
+                        <User size={12} />
+                      </div>
+                      <span className="text-[13px] font-semibold text-ui-info">You</span>
+                    </div>
+                    <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                      {time && <span className="text-[10px] text-ui-subtle">{time}</span>}
+                    </div>
+                  </div>
+                  <div className="pt-0">
+                    <p className="text-sm text-ui-strong whitespace-pre-wrap break-words">{entry.message.content}</p>
+                  </div>
+                </div>
               </div>
             );
           }
 
-          if (entry.kind === "user" && entry.message) {
+          if (entry.kind === "passed-group" && entry.agents) {
             return (
-              <div key={entry.message.id} className="flex gap-2.5">
-                <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-medium shrink-0">You</div>
-                <div className="flex-1 pt-1">
-                  <p className="text-sm text-zinc-200">{entry.message.content}</p>
-                </div>
+              <div key={entry.groupKey}>
+                <PassMarker agents={entry.agents} stateAgents={state.agents} />
               </div>
             );
           }
 
           if (entry.kind === "passed" && entry.message && entry.agent) {
-            const aType = resolveAgentType(entry.agent, state.agents);
-            const color = AGENT_COLORS[aType] ?? "text-zinc-400";
-            const bgColor = AGENT_BG_COLORS[aType] ?? "bg-zinc-400";
             return (
-              <div key={entry.message.id} className="flex items-center gap-2 py-0.5 opacity-50">
-                <div className={`w-1.5 h-1.5 rounded-full ${bgColor}`} />
-                <span className={`text-[11px] capitalize ${color}`}>{entry.agent}</span>
-                <span className="text-[10px] text-zinc-600">passed</span>
+              <div key={entry.message.id}>
+                <PassMarker agents={[entry.agent]} stateAgents={state.agents} />
               </div>
             );
           }
 
           if (entry.kind === "shared" && entry.message && entry.agent) {
-            const aType = resolveAgentType(entry.agent, state.agents);
-            const color = AGENT_COLORS[aType] ?? "text-zinc-400";
-            const shareContent = `<Share>${extractShareOnly(entry.message.content)}</Share>`;
+            const info = resolveAgentInfo(entry.agent, state.agents);
+            const aType = info.type;
+            const shareContent = extractShareOnly(entry.message.content);
+            const statuses = extractStatuses(shareContent);
+            const markdownContent = stripStatusTags(shareContent);
+            const time = formatTime(entry.message);
+            const color = AGENT_COLORS[aType] ?? "text-ui-muted";
+            const avatarClass = AGENT_AVATAR_CLASSES[aType] ?? "";
+            const modelText = info.model ?? "unknown";
+            const railColor = aType === "claude"
+              ? "var(--agent-claude)"
+              : aType === "codex"
+                ? "var(--agent-codex)"
+                : aType === "kimi"
+                  ? "var(--agent-kimi)"
+                  : "var(--border-active)";
             return (
-              <div key={entry.message.id} className="flex gap-2.5">
-                <div className={`w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center shrink-0 ${color}`}>
-                  <AgentIcon agent={aType} size={14} />
-                </div>
-                <div className="flex-1 pt-0.5 min-w-0">
-                  <span className={`text-xs font-medium capitalize ${color}`}>{entry.agent}</span>
-                  <StyledMarkdown
-                    className="prose prose-invert prose-sm max-w-none text-zinc-300 text-xs leading-relaxed break-words"
-                    shareHeader={null}
-                  >
-                    {shareContent}
-                  </StyledMarkdown>
-                </div>
+              <div
+                key={entry.message.id}
+                className={animateClass}
+                style={animateStyle}
+              >
+                <Card className="mx-2 md:mx-3 share-card" style={{ ["--share-rail-color" as string]: railColor }}>
+                  <CardHeader className="flex items-center gap-1.5 px-4 py-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className={`chat-avatar ${avatarClass} ${color}`}>
+                        <AgentIcon agent={aType} size={14} />
+                      </div>
+                      <span className={`text-[13px] font-semibold capitalize ${color}`}>{entry.agent}</span>
+                      <span className="text-[10px] text-ui-faint shrink-0" style={{ opacity: 0.7 }}>·</span>
+                      <span className="text-[10px] text-ui-faint capitalize shrink-0" style={{ opacity: 0.7 }}>{aType}</span>
+                      <span className="text-[10px] text-ui-faint shrink-0" style={{ opacity: 0.7 }}>·</span>
+                      <span className="text-[10px] text-ui-faint shrink-0" style={{ opacity: 0.7 }}>{modelText}</span>
+                    </div>
+                    <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                      {time && <span className="text-[10px] text-ui-subtle">{time}</span>}
+                      <span className="badge badge-shared text-[9px] py-0">shared</span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="share-card-content px-4 py-3 text-share-body">
+                    <StyledMarkdown className="prose prose-invert prose-sm max-w-none text-ui-muted text-[12px] leading-[1.5] break-words">
+                      {markdownContent}
+                    </StyledMarkdown>
+                  </CardContent>
+                  {statuses.length > 0 && (
+                    <CardFooter className="share-card-footer px-4 py-2 overflow-x-auto">
+                      <div className="flex flex-nowrap gap-1.5 whitespace-nowrap pb-0.5">
+                        {statuses.map((status, sIdx) => (
+                          <span key={`${status}-${sIdx}`} className={`badge share-status-badge shrink-0 ${STATUS_COLORS[status] || DEFAULT_STATUS_COLOR}`}>
+                            {status}
+                          </span>
+                        ))}
+                      </div>
+                    </CardFooter>
+                  )}
+                </Card>
               </div>
             );
           }
 
           if (entry.kind === "responded" && entry.message && entry.agent) {
-            const aType = resolveAgentType(entry.agent, state.agents);
-            const color = AGENT_COLORS[aType] ?? "text-zinc-400";
-            const bgColor = AGENT_BG_COLORS[aType] ?? "bg-zinc-400";
+            const info = resolveAgentInfo(entry.agent, state.agents);
+            const aType = info.type;
+            const time = formatTime(entry.message);
             return (
-              <button
+              <div
                 key={entry.message.id}
-                onClick={() => onExpandAgent?.(entry.agent!)}
-                className="flex items-center gap-2 py-0.5 hover:bg-zinc-900/50 rounded px-1 -mx-1 transition-colors group"
+                className={animateClass}
+                style={animateStyle}
               >
-                <div className={`w-1.5 h-1.5 rounded-full ${bgColor}`} />
-                <span className={`text-[11px] capitalize ${color}`}>{entry.agent}</span>
-                <span className="text-[10px] text-zinc-600">responded</span>
-                <span className="text-[10px] text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity">— click to view</span>
-              </button>
+                <AgentMessageCard
+                  agentName={entry.agent}
+                  agentType={aType}
+                  modelLabel={info.model ?? undefined}
+                  className="mx-2 md:mx-3"
+                  onAgentClick={() => onExpandAgent?.(entry.agent!)}
+                  headerRight={(
+                    <>
+                      {time && <span className="text-[10px] font-mono text-ui-subtle">{time}</span>}
+                      <span className="badge badge-responded text-[9px] py-0">responded</span>
+                    </>
+                  )}
+                >
+                  {entry.message.content.length > 1600 ? (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-ui-subtle hover:text-ui mb-1">Show long message</summary>
+                      <StyledMarkdown className="prose prose-invert prose-sm max-w-none text-ui text-[13.5px] leading-[1.7] break-words">
+                        {entry.message.content}
+                      </StyledMarkdown>
+                    </details>
+                  ) : (
+                    <StyledMarkdown className="prose prose-invert prose-sm max-w-none text-ui text-[13.5px] leading-[1.7] break-words">
+                      {entry.message.content}
+                    </StyledMarkdown>
+                  )}
+                </AgentMessageCard>
+              </div>
             );
           }
 
@@ -188,25 +456,55 @@ export default function SharedChat({ state, onExpandAgent }: Props) {
         })}
 
         {activeSharedStreams.map(({ agent, content }) => {
-          const aType = resolveAgentType(agent, state.agents);
-          const color = AGENT_COLORS[aType] ?? "text-zinc-400";
+          const info = resolveAgentInfo(agent, state.agents);
+          const aType = info.type;
+          const statuses = extractStatuses(content);
+          const markdownContent = stripStatusTags(content);
+          const color = AGENT_COLORS[aType] ?? "text-ui-muted";
+          const avatarClass = AGENT_AVATAR_CLASSES[aType] ?? "";
+          const modelText = info.model ?? "unknown";
+          const railColor = aType === "claude"
+            ? "var(--agent-claude)"
+            : aType === "codex"
+              ? "var(--agent-codex)"
+              : aType === "kimi"
+                ? "var(--agent-kimi)"
+                : "var(--border-active)";
           return (
-            <div key={`stream-shared-${agent}`} className="flex gap-2.5">
-              <div className={`w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center shrink-0 ${color}`}>
-                <AgentIcon agent={aType} size={14} />
-              </div>
-              <div className="flex-1 pt-0.5 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-xs font-medium capitalize ${color}`}>{agent}</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" />
-                </div>
-                <StyledMarkdown
-                  className="prose prose-invert prose-sm max-w-none text-zinc-300 text-xs leading-relaxed break-words"
-                  shareHeader={null}
-                >
-                  {`<Share>${content}</Share>`}
-                </StyledMarkdown>
-              </div>
+            <div key={`stream-shared-${agent}`}>
+              <Card className="mx-2 md:mx-3 share-card" style={{ ["--share-rail-color" as string]: railColor }}>
+                <CardHeader className="flex items-center gap-1.5 px-4 py-3">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div className={`chat-avatar ${avatarClass} ${color}`}>
+                      <AgentIcon agent={aType} size={14} />
+                    </div>
+                    <span className={`text-[13px] font-semibold capitalize ${color}`}>{agent}</span>
+                    <span className="text-[10px] text-ui-faint shrink-0" style={{ opacity: 0.7 }}>·</span>
+                    <span className="text-[10px] text-ui-faint capitalize shrink-0" style={{ opacity: 0.7 }}>{aType}</span>
+                    <span className="text-[10px] text-ui-faint shrink-0" style={{ opacity: 0.7 }}>·</span>
+                    <span className="text-[10px] text-ui-faint shrink-0" style={{ opacity: 0.7 }}>{modelText}</span>
+                  </div>
+                  <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full dot-status-streaming animate-pulse" />
+                  </div>
+                </CardHeader>
+                <CardContent className="share-card-content px-4 py-3 text-share-body">
+                  <StyledMarkdown className="prose prose-invert prose-sm max-w-none text-ui-muted text-[12px] leading-[1.5] break-words">
+                    {markdownContent}
+                  </StyledMarkdown>
+                </CardContent>
+                {statuses.length > 0 && (
+                  <CardFooter className="share-card-footer px-4 py-2 overflow-x-auto">
+                    <div className="flex flex-nowrap gap-1.5 whitespace-nowrap pb-0.5">
+                      {statuses.map((status, sIdx) => (
+                        <span key={`${status}-${sIdx}`} className={`badge share-status-badge shrink-0 ${STATUS_COLORS[status] || DEFAULT_STATUS_COLOR}`}>
+                          {status}
+                        </span>
+                      ))}
+                    </div>
+                  </CardFooter>
+                )}
+              </Card>
             </div>
           );
         })}
@@ -214,13 +512,16 @@ export default function SharedChat({ state, onExpandAgent }: Props) {
         <div ref={bottomRef} />
       </div>
       {!isNearBottom && (
-        <button
+        <Button
           onClick={scrollToBottom}
-          className="sticky bottom-3 left-1/2 -translate-x-1/2 w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors shadow-lg"
+          variant="secondary"
+          size="sm"
+          className="sticky bottom-3 left-1/2 -translate-x-1/2 w-8 h-8 !p-0 rounded-full bg-ui-elevated border-ui-strong text-ui-muted hover:bg-ui-soft hover:text-ui"
           title="Jump to bottom"
+          icon={<ArrowDown size={14} />}
         >
-          <ArrowDown size={14} />
-        </button>
+          <span className="sr-only">Jump to bottom</span>
+        </Button>
       )}
     </div>
   );

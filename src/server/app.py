@@ -67,9 +67,9 @@ def _validate_ws_message(msg: dict) -> str | None:
     return None
 
 _DEFAULT_AGENTS = [
-    {"name": "claude", "type": "claude", "role": ""},
-    {"name": "codex", "type": "codex", "role": ""},
-    {"name": "kimi", "type": "kimi", "role": ""},
+    {"name": "claude", "type": "claude", "role": "", "model": None},
+    {"name": "codex", "type": "codex", "role": "", "model": None},
+    {"name": "kimi", "type": "kimi", "role": "", "model": None},
 ]
 
 
@@ -89,7 +89,7 @@ def create_app(
     agents_list = list(default_agents or _DEFAULT_AGENTS)
     # Normalize to persona dicts if strings
     if agents_list and isinstance(agents_list[0], str):
-        agents_list = [{"name": a, "type": a, "role": ""} for a in agents_list]
+        agents_list = [{"name": a, "type": a, "role": "", "model": None} for a in agents_list]
     runner = SessionRunner(
         store=store,
         timeout=timeout,
@@ -103,6 +103,27 @@ def create_app(
 
     async def _store_call(fn, *args, **kwargs):
         return await asyncio.to_thread(fn, *args, **kwargs)
+
+    def _agents_with_models(spec: list[str] | list[dict]) -> list[dict]:
+        """Normalize agent specs and attach configured model when not explicitly set."""
+        normalized: list[dict] = []
+        for item in spec:
+            if isinstance(item, str):
+                agent_type = item
+                model = settings.get(f"agents.{agent_type}.model")
+                normalized.append({"name": item, "type": agent_type, "role": "", "model": model})
+                continue
+            agent_type = item.get("type", "")
+            model = item.get("model")
+            if not model and agent_type:
+                model = settings.get(f"agents.{agent_type}.model")
+            normalized.append({
+                "name": item.get("name", agent_type),
+                "type": agent_type,
+                "role": item.get("role", ""),
+                "model": model,
+            })
+        return normalized
 
     def _validate_session_config(config: dict | None) -> str | None:
         if config is None:
@@ -167,7 +188,11 @@ def create_app(
         error = _validate_session_config(session_config)
         if error:
             return JSONResponse(status_code=400, content={"detail": error})
-        return store.create_session(agent_names=agents_list, working_dir=working_dir, config=session_config)
+        return store.create_session(
+            agent_names=_agents_with_models(agents_list),
+            working_dir=working_dir,
+            config=session_config,
+        )
 
     @app.delete("/api/sessions/{session_id}")
     async def delete_session(session_id: str):
@@ -354,7 +379,7 @@ def create_app(
         await ws.accept()
         log.info("ws connected")
         session_id: str | None = None
-        await ws.send_json({"type": "connected", "agents": agents_list})
+        await ws.send_json({"type": "connected", "agents": _agents_with_models(agents_list)})
 
         # Rate limiting state
         _rate_timestamps: list[float] = []
@@ -394,6 +419,7 @@ def create_app(
                     if working_dir:
                         working_dir = str(Path(working_dir).expanduser().resolve())
                     agents_spec = msg.get("agents", agents_list)
+                    agents_spec = _agents_with_models(agents_spec)
                     session_config = msg.get("config")
                     error = _validate_session_config(session_config)
                     if error:
@@ -454,7 +480,7 @@ def create_app(
                         cards = runner.get_cards(session_id, session["agent_names"])
                         await ws.send_json({
                             "type": "session_joined", "session_id": session_id,
-                            "title": session.get("title", ""), "agents": session["agent_names"],
+                            "title": session.get("title", ""), "agents": _agents_with_models(session["agent_names"]),
                             "messages": messages, "is_running": is_running, "in_flight": in_flight,
                             "cards": cards,
                         })
@@ -546,12 +572,18 @@ def create_app(
                     if name in existing_names:
                         await ws.send_json({"type": "error", "message": f"Agent name '{name}' already exists"})
                         continue
-                    persona = {"name": name, "type": agent_type, "role": role}
+                    persona = _agents_with_models([{"name": name, "type": agent_type, "role": role}])[0]
                     updated_agents = session["agent_names"] + [persona]
                     await _store_call(store.update_agents, session_id, updated_agents)
                     await _store_call(store.add_agent_state, session_id, name)
                     await runner.add_agent(session_id, persona)
-                    await runner.broadcast(session_id, {"type": "agent_added", "name": name, "agent_type": agent_type, "role": role})
+                    await runner.broadcast(session_id, {
+                        "type": "agent_added",
+                        "name": name,
+                        "agent_type": agent_type,
+                        "role": role,
+                        "model": persona.get("model"),
+                    })
 
                 elif msg_type == "remove_agent":
                     if not session_id:

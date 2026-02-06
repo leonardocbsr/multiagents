@@ -23,6 +23,14 @@ DEFAULTS: dict[str, Any] = {
     "memory.model": "haiku",
     "server.warmup_ttl": 300,
     "server.max_events": 2000,
+    # UI layout feature flags
+    "ui.layout.default": "split",  # "split" | "chat"
+    "ui.layout.allow_switch": True,
+    "ui.layout.split_enabled": True,
+    # UI appearance flags
+    "ui.theme.mode": "dark",  # "dark" | "light" | "system"
+    "ui.theme.accent": "cyan",  # "cyan" | "emerald" | "amber"
+    "ui.theme.density": "cozy",  # "compact" | "cozy"
     # Permission mode per agent: "bypass" | "auto" | "manual"
     "agents.claude.permissions": "bypass",
     "agents.codex.permissions": "bypass",

@@ -1,23 +1,28 @@
 import { useCallback, useMemo, useState } from "react";
+import { User } from "lucide-react";
 import type { Message, AgentInfo } from "../types";
 import { parseCoordinationPatterns } from "../types";
 import { AgentIcon, AGENT_COLORS } from "./AgentIcons";
 import StyledMarkdown from "./StyledMarkdown";
 import CoordinationBadges from "./CoordinationBadges";
+import { Button } from "./ui";
+import AgentMessageCard from "./AgentMessageCard";
 
 interface Props {
   message: Message;
   agents?: AgentInfo[];
+  density?: "compact" | "comfortable";
 }
 
-export default function MessageBubble({ message, agents }: Props) {
+export default function MessageBubble({ message, agents, density = "comfortable" }: Props) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
   const isSystem = message.role === "system" || message.role === "error";
   const isPassed = message.passed;
   const agentInfo = agents?.find(a => a.name === message.role);
   const agentType = agentInfo?.type ?? message.role;
-  const color = AGENT_COLORS[agentType] ?? "text-zinc-400";
+  const modelLabel = agentInfo?.model ?? undefined;
+  const color = AGENT_COLORS[agentType] ?? "text-ui-muted";
   const canCopy = !isUser && !isSystem && !isPassed && message.content.trim().length > 0;
 
   // Parse coordination patterns for agent messages
@@ -49,63 +54,100 @@ export default function MessageBubble({ message, agents }: Props) {
 
   if (isUser) {
     return (
-      <div className="flex gap-2.5">
-        <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-medium shrink-0">You</div>
-        <div className="flex-1 pt-1"><p className="text-sm text-zinc-200">{message.content}</p></div>
+      <div className="flex-1 min-w-0">
+        <div className="chat-bubble-agent relative overflow-hidden">
+          <span
+            aria-hidden="true"
+            className="absolute left-0 top-0 bottom-0 w-[2px]"
+            style={{ background: "var(--accent-500)", opacity: 0.6 }}
+          />
+          <div className="flex items-center mb-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="chat-avatar border-ui-info-soft text-ui-info" aria-label="You">
+                <User size={12} />
+              </div>
+              <span className="text-[13px] font-semibold text-ui-info">You</span>
+            </div>
+          </div>
+          <div className="pt-0">
+            <p className="text-sm text-ui-strong whitespace-pre-wrap break-words">{message.content}</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (isSystem) {
     return (
-      <div className="flex gap-2.5">
-        <div className="w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center text-xs font-medium text-amber-200 shrink-0">!</div>
-        <div className="flex-1 pt-1">
-          <p className="text-xs text-amber-200 whitespace-pre-wrap">{message.content}</p>
+      <div className={`flex ${density === "compact" ? "gap-2" : "gap-3"}`}>
+        <div className="chat-avatar text-ui-warn">!</div>
+        <div className="flex-1 min-w-0">
+          <div className="chat-bubble-system">
+            <p className="text-xs whitespace-pre-wrap break-words">{message.content}</p>
+          </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className={`flex gap-2.5 ${isPassed ? "opacity-40" : ""}`}>
-      <div className={`w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center shrink-0 ${color}`}>
-        <AgentIcon agent={agentType} size={14} />
-      </div>
-      <div className="flex-1 pt-0.5 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className={`text-xs font-medium capitalize ${color}`}>{message.role}</span>
-          {isPassed && <span className="text-[10px] text-zinc-600">[PASS]</span>}
-          {!isPassed && meta && <span className="text-[10px] text-zinc-600">{meta}</span>}
-          {message.stderr && (
-            <span
-              className="text-[10px] text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5"
-              title={message.stderr}
-            >
-              stderr
-            </span>
-          )}
-          {canCopy && (
-            <button
-              onClick={handleCopy}
-              className="ml-auto text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
-              title="Copy response"
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          )}
+  // Pass indicator — dashed circle + name
+  if (isPassed) {
+    return (
+      <div className="flex items-center gap-2 py-0.5 opacity-45">
+        <div className="w-5 h-5 rounded-full border border-dashed border-ui-dashed flex items-center justify-center">
+          <span className={`${color} opacity-70`}><AgentIcon agent={agentType} size={9} /></span>
         </div>
-        {isPassed ? (
-          <p className="text-xs text-zinc-600 italic">No new input</p>
-        ) : (
+        <span className={`text-[11px] font-mono capitalize ${color} opacity-70`}>{message.role}</span>
+        <span className="text-[11px] font-mono text-ui-faint">passed</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-w-0">
+      <AgentMessageCard
+        agentName={message.role}
+        agentType={agentType}
+        modelLabel={modelLabel}
+        meta={meta}
+        headerRight={(
           <>
-            <StyledMarkdown className="prose prose-invert prose-sm max-w-none text-zinc-300 text-xs leading-relaxed break-words">
-              {message.content}
-            </StyledMarkdown>
-            {patterns && <CoordinationBadges patterns={patterns} />}
+            {message.stderr && (
+              <span
+                className="text-[10px] text-ui-warn bg-ui-warn-soft border border-ui-warn-soft rounded px-1.5 py-0.5"
+                title={message.stderr}
+              >
+                stderr
+              </span>
+            )}
+            {canCopy && (
+              <Button
+                onClick={handleCopy}
+                variant="ghost"
+                size="sm"
+                className="text-[10px] text-ui-subtle hover:text-ui"
+                title="Copy response"
+              >
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            )}
           </>
         )}
-      </div>
+        footer={patterns ? <CoordinationBadges patterns={patterns} /> : undefined}
+      >
+        {message.content.length > 1600 ? (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-ui-subtle hover:text-ui mb-1">Show long message</summary>
+            <StyledMarkdown className="prose prose-invert prose-sm max-w-none text-ui text-[13.5px] leading-[1.7] break-words">
+              {message.content}
+            </StyledMarkdown>
+          </details>
+        ) : (
+          <StyledMarkdown className="prose prose-invert prose-sm max-w-none text-ui text-[13.5px] leading-[1.7] break-words">
+            {message.content}
+          </StyledMarkdown>
+        )}
+      </AgentMessageCard>
     </div>
   );
 }

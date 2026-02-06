@@ -311,7 +311,7 @@ function reducer(state: AppState, action: Action): AppState {
       };
 
     case "agent_added": {
-      const newAgent: AgentInfo = { name: msg.name, type: msg.agent_type, role: msg.role };
+      const newAgent: AgentInfo = { name: msg.name, type: msg.agent_type, role: msg.role, model: msg.model ?? null };
       return {
         ...state,
         agents: [...state.agents, newAgent],

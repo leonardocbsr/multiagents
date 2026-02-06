@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import { Button, Input, Select, Switch, Textarea } from "./ui";
 
 interface Props {
   agents: string[];
@@ -34,39 +35,32 @@ export default function CardForm({ agents, onSubmit, onCancel }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 mb-3">
+    <form onSubmit={handleSubmit} className="ui-panel p-3 mb-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-zinc-300">New Task</span>
-        <button type="button" onClick={onCancel} className="text-zinc-500 hover:text-zinc-300 transition-colors">
-          <X size={14} />
-        </button>
+        <span className="text-xs font-medium text-ui">New Task</span>
+        <Button type="button" onClick={onCancel} variant="ghost" size="sm" icon={<X size={14} />}><span className="sr-only">Close</span></Button>
       </div>
 
-      <input
+      <Input
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Title"
-        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 mb-2"
+        className="w-full bg-ui-elevated border-ui-strong text-sm text-ui placeholder:text-ui-faint mb-2"
         autoFocus
       />
 
-      <textarea
+      <Textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Description"
         rows={3}
-        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 mb-2 resize-none"
+        className="w-full bg-ui-elevated border-ui-strong text-sm text-ui placeholder:text-ui-faint mb-2 resize-none"
       />
 
       <label className="flex items-center gap-2 mb-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={delegateToAI}
-          onChange={(e) => setDelegateToAI(e.target.checked)}
-          className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-0 focus:ring-offset-0"
-        />
-        <span className="text-xs text-zinc-400">Delegate to AI</span>
+        <Switch checked={delegateToAI} onChange={setDelegateToAI} />
+        <span className="text-xs text-ui-muted">Delegate to AI</span>
       </label>
 
       <div className="space-y-1.5 mb-2">
@@ -81,20 +75,20 @@ export default function CardForm({ agents, onSubmit, onCancel }: Props) {
       </div>
 
       <div className="flex items-center gap-2 pt-1">
-        <button
+        <Button
           type="submit"
           disabled={!title.trim() || !description.trim()}
-          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded px-3 py-1.5 text-sm font-medium text-white transition-colors"
+          className="ui-btn-primary disabled:opacity-40 text-sm font-medium"
         >
           Create Card
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={onCancel}
-          className="text-zinc-400 hover:text-zinc-200 px-3 py-1.5 text-sm transition-colors"
+          variant="ghost"
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -108,11 +102,11 @@ function RoleSelect({ label, value, onChange, agents }: {
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-zinc-500 w-20 shrink-0">{label}</span>
-      <select
+      <span className="text-xs text-ui-subtle w-20 shrink-0">{label}</span>
+      <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
+        className="flex-1 bg-ui-elevated border-ui-strong text-sm text-ui"
       >
         <option value="">Unassigned</option>
         {agents.map((agent) => (
@@ -120,7 +114,7 @@ function RoleSelect({ label, value, onChange, agents }: {
             {agent}
           </option>
         ))}
-      </select>
+      </Select>
     </div>
   );
 }

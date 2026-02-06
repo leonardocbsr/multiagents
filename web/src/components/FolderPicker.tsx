@@ -1,6 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Folder, ChevronRight, X, Keyboard } from "lucide-react";
+import { Folder, ChevronRight, Keyboard } from "lucide-react";
 import { fetchDirectories } from "../api";
+import Button from "./ui/Button";
+import Input from "./ui/Input";
+import Modal from "./ui/Modal";
 
 interface Props {
   open: boolean;
@@ -17,6 +20,7 @@ export default function FolderPicker({ open, initialPath, onSelect, onClose }: P
   const [manualMode, setManualMode] = useState(false);
   const [manualPath, setManualPath] = useState("");
   const manualRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   const navigate = useCallback((to: string) => {
     setError(null);
@@ -50,6 +54,15 @@ export default function FolderPicker({ open, initialPath, onSelect, onClose }: P
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (!open || !modalRef.current) return;
+    const root = modalRef.current;
+    const focusable = root.querySelectorAll<HTMLElement>(
+      'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',
+    );
+    focusable[0]?.focus();
+  }, [open]);
+
   if (!open) return null;
 
   const segments = path.split("/").filter(Boolean);
@@ -60,26 +73,53 @@ export default function FolderPicker({ open, initialPath, onSelect, onClose }: P
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-lg mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">Select folder</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
-            <X size={16} />
-          </button>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Choose Workspace"
+      className="max-w-lg"
+      footer={(
+        <div className="space-y-2">
+          {manualMode ? (
+            <div className="flex gap-2">
+              <Input
+                ref={manualRef}
+                type="text"
+                value={manualPath}
+                onChange={(e) => setManualPath(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") goManual(); }}
+                placeholder="/path/to/folder"
+                className="flex-1"
+              />
+              <Button onClick={goManual} size="sm">Go</Button>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <Button onClick={() => onSelect(path)} disabled={loading} className="flex-1">Use this folder</Button>
+            <Button onClick={() => setManualMode(!manualMode)} variant="ghost" size="sm" title={manualMode ? "Browse" : "Type path"} icon={<Keyboard size={14} />}>
+              <span className="sr-only">Toggle manual path mode</span>
+            </Button>
+          </div>
         </div>
+      )}
+    >
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Select folder"
+      >
 
         {/* Breadcrumbs */}
-        <div className="px-4 py-2 border-b border-zinc-800 overflow-x-auto">
-          <div className="flex items-center gap-1 text-xs text-zinc-400 whitespace-nowrap">
-            <button onClick={() => navigate("/")} className="hover:text-zinc-200 transition-colors">/</button>
+        <div className="px-4 py-2 border-b border-ui overflow-x-auto">
+          <div className="flex items-center gap-1 text-xs text-ui-muted whitespace-nowrap">
+            <Button onClick={() => navigate("/")} variant="ghost" size="sm" className="!p-0 hover:text-ui">/</Button>
             {segments.map((seg, i) => {
               const prefix = "/" + segments.slice(0, i + 1).join("/");
               return (
                 <span key={prefix} className="flex items-center gap-1">
-                  <ChevronRight size={12} className="text-zinc-600" />
-                  <button onClick={() => navigate(prefix)} className="hover:text-zinc-200 transition-colors">{seg}</button>
+                  <ChevronRight size={12} className="text-ui-faint" />
+                  <Button onClick={() => navigate(prefix)} variant="ghost" size="sm" className="!p-0 hover:text-ui">{seg}</Button>
                 </span>
               );
             })}
@@ -87,62 +127,30 @@ export default function FolderPicker({ open, initialPath, onSelect, onClose }: P
         </div>
 
         {/* Error */}
-        {error && <div className="px-4 py-2 text-xs text-red-400">{error}</div>}
+        {error && <div className="px-4 py-2 text-xs text-ui-danger">{error}</div>}
 
         {/* Directory list */}
         <div className="max-h-[50vh] overflow-y-auto">
           {loading ? (
-            <p className="px-4 py-6 text-xs text-zinc-600 text-center">Loading...</p>
+            <p className="px-4 py-6 text-xs text-ui-faint text-center">Loading...</p>
           ) : dirs.length === 0 ? (
-            <p className="px-4 py-6 text-xs text-zinc-600 text-center">No subdirectories</p>
+            <p className="px-4 py-6 text-xs text-ui-faint text-center">No subdirectories</p>
           ) : (
             dirs.map((name) => (
-              <button
+              <Button
                 key={name}
                 onClick={() => navigate(path + "/" + name)}
-                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors text-left"
+                variant="ghost"
+                className="w-full justify-start gap-2 px-4 py-2 text-sm text-ui hover:bg-ui-elevated text-left"
               >
-                <Folder size={14} className="text-zinc-500 shrink-0" />
+                <Folder size={14} className="text-ui-subtle shrink-0" />
                 <span className="truncate">{name}</span>
-              </button>
+              </Button>
             ))
           )}
         </div>
 
-        {/* Footer */}
-        <div className="border-t border-zinc-800 px-4 py-3 space-y-2">
-          {manualMode ? (
-            <div className="flex gap-2">
-              <input
-                ref={manualRef}
-                type="text"
-                value={manualPath}
-                onChange={(e) => setManualPath(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") goManual(); }}
-                placeholder="/path/to/folder"
-                className="flex-1 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-              <button onClick={goManual} className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded text-sm text-zinc-200 transition-colors">Go</button>
-            </div>
-          ) : null}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onSelect(path)}
-              disabled={loading}
-              className="flex-1 px-3 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm text-zinc-200 transition-colors disabled:opacity-50"
-            >
-              Select this folder
-            </button>
-            <button
-              onClick={() => setManualMode(!manualMode)}
-              className="p-2 text-zinc-500 hover:text-zinc-300 transition-colors"
-              title={manualMode ? "Browse" : "Type path"}
-            >
-              <Keyboard size={14} />
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

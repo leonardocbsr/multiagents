@@ -320,6 +320,16 @@ def test_persistent_batch_prompt_combines_events():
     assert "[Codex] shared:\nnew findings" in prompt
 
 
+def test_relay_dedup_blocks_repeated_share_within_cooldown():
+    agent = PersistentSequencedAgent("claude", responses=[(0.00, "[PASS]")])
+    room = ChatRoom([agent])
+
+    assert room._should_relay_share("claude", "codex", "same finding") is True
+    assert room._should_relay_share("claude", "codex", "same finding") is False
+    # Whitespace/case variations are treated as duplicates.
+    assert room._should_relay_share("Claude", "Codex", "  SAME   finding ") is False
+
+
 @pytest.mark.asyncio
 async def test_persistent_round_attribution_with_overlap():
     agent = PersistentSequencedAgent(

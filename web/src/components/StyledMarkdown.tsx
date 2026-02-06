@@ -3,24 +3,25 @@ import type { Components } from "react-markdown";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { Card, CardContent, CardFooter, CardHeader } from "./ui";
 
 /** Color config for known XML tag families. */
 const TAG_STYLES: Record<string, { border: string; bg: string; text: string; pill: string; pillBg: string }> = {
-  system:          { border: "border-cyan-500/20",    bg: "bg-cyan-500/5",    text: "text-cyan-400/70",    pill: "text-cyan-400",    pillBg: "bg-cyan-500/15" },
-  thinking:        { border: "border-purple-500/20",  bg: "bg-purple-500/5",  text: "text-purple-400/70",  pill: "text-purple-400",  pillBg: "bg-purple-500/15" },
-  antThinking:     { border: "border-purple-500/20",  bg: "bg-purple-500/5",  text: "text-purple-400/70",  pill: "text-purple-400",  pillBg: "bg-purple-500/15" },
-  result:          { border: "border-emerald-500/20", bg: "bg-emerald-500/5", text: "text-emerald-400/70", pill: "text-emerald-400", pillBg: "bg-emerald-500/15" },
-  error:           { border: "border-red-500/20",     bg: "bg-red-500/5",     text: "text-red-400/70",     pill: "text-red-400",     pillBg: "bg-red-500/15" },
-  tool_use:        { border: "border-amber-500/20",   bg: "bg-amber-500/5",   text: "text-amber-400/70",   pill: "text-amber-400",   pillBg: "bg-amber-500/15" },
-  tool_call:       { border: "border-amber-500/20",   bg: "bg-amber-500/5",   text: "text-amber-400/70",   pill: "text-amber-400",   pillBg: "bg-amber-500/15" },
-  tool_result:     { border: "border-amber-500/20",   bg: "bg-amber-500/5",   text: "text-amber-400/70",   pill: "text-amber-400",   pillBg: "bg-amber-500/15" },
-  search_results:  { border: "border-blue-500/20",    bg: "bg-blue-500/5",    text: "text-blue-400/70",    pill: "text-blue-400",    pillBg: "bg-blue-500/15" },
-  artifact:        { border: "border-indigo-500/20",  bg: "bg-indigo-500/5",  text: "text-indigo-400/70",  pill: "text-indigo-400",  pillBg: "bg-indigo-500/15" },
-  tool_output:     { border: "border-zinc-600/20",    bg: "bg-zinc-500/5",    text: "text-zinc-500/70",    pill: "text-zinc-500",    pillBg: "bg-zinc-600/15" },
-  "system-reminder":{ border: "border-cyan-500/20",   bg: "bg-cyan-500/5",    text: "text-cyan-400/70",    pill: "text-cyan-400",    pillBg: "bg-cyan-500/15" },
+  system: { border: "border-ui-info-soft", bg: "bg-ui-info-soft", text: "text-ui-info", pill: "text-ui-info", pillBg: "bg-ui-info-soft" },
+  thinking: { border: "border-ui-violet-soft", bg: "bg-ui-violet-soft", text: "text-ui-violet", pill: "text-ui-violet", pillBg: "bg-ui-violet-soft" },
+  antThinking: { border: "border-ui-violet-soft", bg: "bg-ui-violet-soft", text: "text-ui-violet", pill: "text-ui-violet", pillBg: "bg-ui-violet-soft" },
+  result: { border: "border-ui-success-soft", bg: "bg-ui-success-soft", text: "text-ui-success", pill: "text-ui-success", pillBg: "bg-ui-success-soft" },
+  error: { border: "border-ui-danger-soft", bg: "bg-ui-danger-soft", text: "text-ui-danger", pill: "text-ui-danger", pillBg: "bg-ui-danger-soft" },
+  tool_use: { border: "border-ui-warn-soft", bg: "bg-ui-warn-soft", text: "text-ui-warn", pill: "text-ui-warn", pillBg: "bg-ui-warn-soft" },
+  tool_call: { border: "border-ui-warn-soft", bg: "bg-ui-warn-soft", text: "text-ui-warn", pill: "text-ui-warn", pillBg: "bg-ui-warn-soft" },
+  tool_result: { border: "border-ui-warn-soft", bg: "bg-ui-warn-soft", text: "text-ui-warn", pill: "text-ui-warn", pillBg: "bg-ui-warn-soft" },
+  search_results: { border: "border-ui-info-soft", bg: "bg-ui-info-soft", text: "text-ui-info", pill: "text-ui-info", pillBg: "bg-ui-info-soft" },
+  artifact: { border: "border-ui-violet-soft", bg: "bg-ui-violet-soft", text: "text-ui-violet", pill: "text-ui-violet", pillBg: "bg-ui-violet-soft" },
+  tool_output: { border: "border-ui-soft", bg: "bg-ui-soft", text: "text-ui-subtle", pill: "text-ui-subtle", pillBg: "bg-ui-soft" },
+  "system-reminder": { border: "border-ui-info-soft", bg: "bg-ui-info-soft", text: "text-ui-info", pill: "text-ui-info", pillBg: "bg-ui-info-soft" },
 };
 
-const DEFAULT_STYLE = { border: "border-zinc-600/20", bg: "bg-zinc-500/5", text: "text-zinc-400/70", pill: "text-zinc-400", pillBg: "bg-zinc-500/15" };
+const DEFAULT_STYLE = { border: "border-ui-soft", bg: "bg-ui-soft", text: "text-ui-muted", pill: "text-ui-muted", pillBg: "bg-ui-soft" };
 
 type Segment =
   | { kind: "text"; content: string }
@@ -86,11 +87,11 @@ function ToolBadge({ content }: { content: string }) {
 
   return (
     <div className="my-0.5 flex items-start gap-1.5 text-[11px] min-w-0">
-      <span className="inline-flex items-center gap-1 font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md font-mono shrink-0">
+      <span className="inline-flex items-center gap-1 font-medium text-ui-warn bg-ui-warn-soft border border-ui-warn-soft px-1.5 py-0.5 rounded-md font-mono shrink-0">
         {action}
       </span>
       {detail && (
-        <span className="text-zinc-500 font-mono break-all">{detail}</span>
+        <span className="text-ui-subtle font-mono break-all">{detail}</span>
       )}
     </div>
   );
@@ -119,13 +120,13 @@ function ThinkingBlock({ content }: { content: string }) {
 
   return (
     <details className="my-0.5 group">
-      <summary className="flex items-center gap-1.5 cursor-pointer text-[11px] text-purple-400/60 hover:text-purple-400/80 transition-colors select-none list-none">
-        <span className="inline-flex items-center font-medium bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded-md font-mono shrink-0">
+      <summary className="flex items-center gap-1.5 cursor-pointer text-[11px] text-ui-violet transition-colors select-none list-none">
+        <span className="inline-flex items-center font-medium bg-ui-violet-soft border border-ui-violet-soft px-1.5 py-0.5 rounded-md font-mono shrink-0">
           Thinking
         </span>
-        <span className="text-zinc-600 italic truncate">{summary}{hasMore ? " ..." : ""}</span>
+        <span className="text-ui-faint italic truncate">{summary}{hasMore ? " ..." : ""}</span>
       </summary>
-      <div className="thinking-expanded mt-1 ml-1 border-l-2 border-purple-500/15 pl-2.5 text-[11px] text-purple-300/40 break-words leading-relaxed">
+      <div className="thinking-expanded mt-1 ml-1 border-l-2 border-ui-violet-soft pl-2.5 text-[11px] text-ui-violet break-words leading-relaxed">
         <Markdown remarkPlugins={remarkPlugins} components={mdComponents}>{trimmed}</Markdown>
       </div>
     </details>
@@ -141,13 +142,13 @@ function ToolOutputBlock({ content }: { content: string }) {
 
   return (
     <details className="my-0.5 group">
-      <summary className="flex items-center gap-1.5 cursor-pointer text-[11px] text-zinc-500/60 hover:text-zinc-400/80 transition-colors select-none list-none">
-        <span className="inline-flex items-center font-medium bg-zinc-600/10 border border-zinc-600/20 px-1.5 py-0.5 rounded-md font-mono shrink-0">
+      <summary className="flex items-center gap-1.5 cursor-pointer text-[11px] text-ui-subtle transition-colors select-none list-none">
+        <span className="inline-flex items-center font-medium bg-ui-soft border border-ui-soft px-1.5 py-0.5 rounded-md font-mono shrink-0">
           Output
         </span>
-        <span className="text-zinc-600 font-mono truncate">{preview}{hasMore ? " ..." : ""}</span>
+        <span className="text-ui-faint font-mono truncate">{preview}{hasMore ? " ..." : ""}</span>
       </summary>
-      <div className="mt-1 ml-1 border-l-2 border-zinc-600/15 pl-2.5 text-[11px] text-zinc-500/50 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-64 overflow-y-auto">
+      <div className="mt-1 ml-1 border-l-2 border-ui-soft pl-2.5 text-[11px] text-ui-subtle font-mono whitespace-pre-wrap break-words leading-relaxed max-h-64 overflow-y-auto">
         {trimmed}
       </div>
     </details>
@@ -156,117 +157,78 @@ function ToolOutputBlock({ content }: { content: string }) {
 
 /** Status badge colors */
 const STATUS_COLORS: Record<string, string> = {
-  EXPLORE: "bg-blue-500/30 text-blue-200 border-blue-500/40",
-  DECISION: "bg-emerald-500/30 text-emerald-200 border-emerald-500/40",
-  BLOCKED: "bg-red-500/30 text-red-200 border-red-500/40",
-  DONE: "bg-green-500/30 text-green-200 border-green-500/40",
-  TODO: "bg-amber-500/30 text-amber-200 border-amber-500/40",
-  QUESTION: "bg-purple-500/30 text-purple-200 border-purple-500/40",
-  READY: "bg-cyan-500/30 text-cyan-200 border-cyan-500/40",
-  "IN PROGRESS": "bg-sky-500/30 text-sky-200 border-sky-500/40",
+  EXPLORE: "badge-info",
+  DECISION: "badge-success",
+  BLOCKED: "badge-danger",
+  DONE: "badge-success",
+  TODO: "badge-warn",
+  QUESTION: "badge-violet",
+  READY: "badge-cyan",
+  "IN PROGRESS": "badge-info",
 };
-const DEFAULT_STATUS_COLOR = "bg-zinc-500/30 text-zinc-200 border-zinc-500/40";
+const DEFAULT_STATUS_COLOR = "badge-info";
 
-const STATUS_TAG_RE = /(?:\[(EXPLORE|DECISION|BLOCKED|DONE|TODO|QUESTION)\]|\[STATUS:\s*([^\]\n]+)\])/i;
 const STATUS_TAG_RE_GLOBAL = /(?:\[(EXPLORE|DECISION|BLOCKED|DONE|TODO|QUESTION)\]|\[STATUS:\s*([^\]\n]+)\])/gi;
 
 function normalizeStatus(status: string): string {
   return status.trim().replace(/\s+/g, " ").toUpperCase();
 }
 
-/** Render text with status tags highlighted as badges (supports [EXPLORE] and [STATUS: ...]) */
-function TextWithStatusBadges({ text }: { text: string }) {
+function extractStatuses(text: string): string[] {
   STATUS_TAG_RE_GLOBAL.lastIndex = 0;
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match;
-  
+  const found: string[] = [];
+  let match: RegExpExecArray | null;
   while ((match = STATUS_TAG_RE_GLOBAL.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-    
-    const status = normalizeStatus(match[1] ?? match[2] ?? "");
-    parts.push(
-      <span
-        key={match.index}
-        className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${STATUS_COLORS[status] || DEFAULT_STATUS_COLOR}`}
-      >
-        {status}
-      </span>
-    );
-    
-    lastIndex = match.index + match[0].length;
+    found.push(normalizeStatus(match[1] ?? match[2] ?? ""));
   }
-  
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-  
-  return <>{parts.length > 0 ? parts : text}</>;
+  return found;
 }
 
-/** Check if text contains status tags (supports both [EXPLORE] and [STATUS: ...]) */
-function hasStatusTags(text: string): boolean {
-  return STATUS_TAG_RE.test(text);
-}
-
-/** Group Share block lines: consecutive non-status lines form a single markdown block. */
-function groupShareLines(content: string): Array<{ kind: "status"; text: string } | { kind: "md"; text: string }> {
-  const lines = content.trim().split('\n');
-  const groups: Array<{ kind: "status"; text: string } | { kind: "md"; text: string }> = [];
-  let mdBuffer: string[] = [];
-
-  const flushMd = () => {
-    if (mdBuffer.length > 0) {
-      groups.push({ kind: "md", text: mdBuffer.join('\n') });
-      mdBuffer = [];
-    }
-  };
-
-  for (const line of lines) {
-    if (hasStatusTags(line)) {
-      flushMd();
-      groups.push({ kind: "status", text: line });
-    } else {
-      mdBuffer.push(line);
-    }
-  }
-  flushMd();
-  return groups;
+function stripStatusTags(text: string): string {
+  return text
+    .replace(STATUS_TAG_RE_GLOBAL, "")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/^\n+/, "")
+    .trim();
 }
 
 /** Process Share block content to highlight coordination patterns */
 function ShareBlock({ content, header }: { content: string; header?: string | null }) {
-  const groups = groupShareLines(content);
+  const statuses = extractStatuses(content);
+  const markdownContent = stripStatusTags(content);
   const showHeader = header !== null && header !== "";
 
   return (
-    <div className="my-1 border border-teal-500/20 bg-teal-500/5 rounded-md">
+    <Card className="my-1.5 share-card">
       {showHeader && (
-        <div className="flex items-center gap-1.5 px-2 py-1 border-b border-teal-500/10 bg-teal-500/10">
-          <svg className="w-3 h-3 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <CardHeader className="flex items-center gap-1.5 px-2.5 py-1.5 surface-share-header">
+          <svg className="w-3 h-3 text-ui-subtle opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
           </svg>
-          <span className="text-[10px] font-medium text-teal-400 uppercase tracking-wide">
+          <span className="text-[10px] font-medium text-ui-subtle uppercase tracking-[0.06em]">
             {header ?? "Shared with agents"}
           </span>
-        </div>
+        </CardHeader>
       )}
-      <div className="px-2.5 py-2 text-xs text-teal-100/80 break-words space-y-1">
-        {groups.map((group, i) => (
-          <div key={i}>
-            {group.kind === "status" ? (
-              <TextWithStatusBadges text={group.text} />
-            ) : (
-              <Markdown remarkPlugins={remarkPlugins} components={mdComponents}>
-                {balanceCodeFences(group.text)}
-              </Markdown>
-            )}
+      <CardContent className="share-card-content px-3 py-2 text-share-body break-words space-y-1">
+        {markdownContent && (
+          <Markdown remarkPlugins={remarkPlugins} components={mdComponents}>
+            {balanceCodeFences(markdownContent)}
+          </Markdown>
+        )}
+      </CardContent>
+      {statuses.length > 0 && (
+        <CardFooter className="share-card-footer px-3 py-2 overflow-x-auto">
+          <div className="flex flex-nowrap gap-1.5 whitespace-nowrap pb-0.5">
+            {statuses.map((status, i) => (
+              <span key={`${status}-${i}`} className={`badge share-status-badge shrink-0 ${STATUS_COLORS[status] || DEFAULT_STATUS_COLOR}`}>
+                {status}
+              </span>
+            ))}
           </div>
-        ))}
-      </div>
-    </div>
+        </CardFooter>
+      )}
+    </Card>
   );
 }
 
@@ -339,10 +301,66 @@ function balanceCodeFences(text: string): string {
 const remarkPlugins = [remarkGfm, remarkBreaks];
 
 const mdComponents: Components = {
+  p({ children }) {
+    return (
+      <p className="my-0.5 leading-[1.4] text-ui">
+        {children}
+      </p>
+    );
+  },
+  ul({ children }) {
+    return (
+      <ul className="my-0.5 pl-5 space-y-0.5 list-disc">
+        {children}
+      </ul>
+    );
+  },
+  ol({ children }) {
+    return (
+      <ol className="my-0.5 pl-5 space-y-0.5 list-decimal">
+        {children}
+      </ol>
+    );
+  },
+  li({ children }) {
+    return (
+      <li className="leading-[1.35] text-ui">
+        {children}
+      </li>
+    );
+  },
+  h1({ children }) {
+    return (
+      <h1 className="mt-2 mb-1 text-[1.45em] leading-tight font-semibold text-ui-strong">
+        {children}
+      </h1>
+    );
+  },
+  h2({ children }) {
+    return (
+      <h2 className="mt-2 mb-1 text-[1.25em] leading-tight font-semibold text-ui-strong">
+        {children}
+      </h2>
+    );
+  },
+  h3({ children }) {
+    return (
+      <h3 className="mt-1.5 mb-1 text-[1.1em] leading-tight font-semibold text-ui-strong">
+        {children}
+      </h3>
+    );
+  },
+  blockquote({ children }) {
+    return (
+      <blockquote className="my-1 pl-3 border-l-2 border-ui-soft text-ui-muted">
+        {children}
+      </blockquote>
+    );
+  },
   pre({ children }) {
     return (
       <div className="relative my-2" style={{ maskImage: "linear-gradient(to right, black calc(100% - 16px), transparent)" }}>
-        <pre className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 overflow-x-auto max-w-full text-[13px] leading-relaxed">
+        <pre className="bg-ui-canvas border border-ui rounded-lg p-3 overflow-x-auto max-w-full text-[13px] leading-relaxed">
           {children}
         </pre>
       </div>
@@ -353,7 +371,7 @@ const mdComponents: Components = {
       return <code className={`${className} font-mono`}>{children}</code>;
     }
     return (
-      <code className="bg-zinc-800 text-zinc-300 px-1 py-0.5 rounded text-[0.85em] font-mono">
+      <code className="bg-ui-elevated text-ui px-1 py-0.5 rounded text-[0.85em] font-mono">
         {children}
       </code>
     );
@@ -369,35 +387,35 @@ const mdComponents: Components = {
   },
   thead({ children }) {
     return (
-      <thead className="bg-zinc-800/50">
+      <thead className="bg-ui-elevated">
         {children}
       </thead>
     );
   },
   tbody({ children }) {
     return (
-      <tbody className="divide-y divide-zinc-800/50">
+      <tbody className="divide-y divide-ui-soft">
         {children}
       </tbody>
     );
   },
   tr({ children }) {
     return (
-      <tr className="border-b border-zinc-800/50 last:border-b-0">
+      <tr className="border-b border-ui last:border-b-0">
         {children}
       </tr>
     );
   },
   th({ children }) {
     return (
-      <th className="px-3 py-2 text-left text-xs font-semibold text-zinc-300 border-b border-zinc-700/50">
+      <th className="px-3 py-2 text-left text-xs font-semibold text-ui border-b border-ui-soft">
         {children}
       </th>
     );
   },
   td({ children }) {
     return (
-      <td className="px-3 py-2 text-xs text-zinc-400">
+      <td className="px-3 py-2 text-xs text-ui-muted">
         {children}
       </td>
     );
@@ -416,24 +434,26 @@ interface Props {
 }
 
 export default function StyledMarkdown({ children, className, shareHeader }: Props) {
-  const segments = useMemo(() => liftShareFromThinking(parseSegments(children)), [children]);
+  const normalized = useMemo(() => children.replace(/^\n+/, ""), [children]);
+  const segments = useMemo(() => liftShareFromThinking(parseSegments(normalized)), [normalized]);
+  const wrapperClass = `overflow-x-hidden [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 ${className ?? ""}`;
 
   // Fast path: no XML tags at all
   if (segments.length === 1 && segments[0].kind === "text") {
     return (
-      <div className={`overflow-x-hidden ${className ?? ""}`}>
-        <Markdown remarkPlugins={remarkPlugins} components={mdComponents}>{balanceCodeFences(children)}</Markdown>
+      <div className={wrapperClass}>
+        <Markdown remarkPlugins={remarkPlugins} components={mdComponents}>{balanceCodeFences(normalized)}</Markdown>
       </div>
     );
   }
 
   return (
-    <div className={`overflow-x-hidden ${className ?? ""}`}>
+    <div className={wrapperClass}>
       {segments.map((seg, i) =>
         seg.kind === "text" ? (
           <Markdown key={i} remarkPlugins={remarkPlugins} components={mdComponents}>{balanceCodeFences(seg.content)}</Markdown>
         ) : (
-          <div key={i} className="py-0.5 border-b border-zinc-800/25 last:border-0">
+          <div key={i} className="py-0.5 border-b border-ui-soft last:border-0">
             <TagBlock tag={seg.tag} content={seg.content} shareHeader={shareHeader} />
           </div>
         ),

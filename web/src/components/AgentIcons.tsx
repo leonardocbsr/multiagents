@@ -24,15 +24,33 @@ export function KimiIcon({ size = 20 }: { size?: number }) {
 }
 
 export const AGENT_COLORS: Record<string, string> = {
-  claude: "text-[#D97757]",
-  kimi: "text-blue-400",
-  codex: "text-green-400",
+  claude: "agent-color-claude",
+  kimi: "agent-color-kimi",
+  codex: "agent-color-codex",
 };
 
 export const AGENT_BG_COLORS: Record<string, string> = {
-  claude: "bg-[#D97757]",
-  kimi: "bg-blue-400",
-  codex: "bg-green-400",
+  claude: "agent-dot-claude",
+  kimi: "agent-dot-kimi",
+  codex: "agent-dot-codex",
+};
+
+export const AGENT_BORDER_COLORS: Record<string, string> = {
+  claude: "border-ui-warn-soft",
+  kimi: "border-ui-info-soft",
+  codex: "border-ui-success-soft",
+};
+
+export const AGENT_AVATAR_CLASSES: Record<string, string> = {
+  claude: "agent-avatar-claude",
+  codex: "agent-avatar-codex",
+  kimi: "agent-avatar-kimi",
+};
+
+export const AGENT_CARD_BORDERS: Record<string, string> = {
+  claude: "agent-border-claude",
+  codex: "agent-border-codex",
+  kimi: "agent-border-kimi",
 };
 
 export function AgentIcon({ agent, size = 20 }: { agent: string; size?: number }) {

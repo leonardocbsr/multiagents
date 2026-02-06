@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
-import { X, RotateCcw } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { RotateCcw } from "lucide-react";
 import { useSettings } from "../hooks/useSettings";
+import { Button, FieldRow, Input, Modal, Panel, Select, Switch, Tabs, Textarea } from "./ui";
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
-type Tab = "agents" | "permissions" | "timeouts" | "advanced";
+type Tab = "agents" | "permissions" | "features" | "timeouts" | "advanced";
 
 const AGENT_TYPES = ["claude", "codex", "kimi"] as const;
 
@@ -15,6 +16,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const { settings, loading, error, update, reset } = useSettings();
   const [tab, setTab] = useState<Tab>("agents");
   const [dirty, setDirty] = useState<Record<string, unknown>>({});
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) setDirty({});
@@ -26,6 +28,32 @@ export default function SettingsModal({ open, onClose }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || !modalRef.current) return;
+    const root = modalRef.current;
+    const focusable = root.querySelectorAll<HTMLElement>(
+      'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',
+    );
+    focusable[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const items = Array.from(focusable).filter((el) => !el.hasAttribute("disabled"));
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   const getValue = useCallback((key: string) => {
     if (key in dirty) return dirty[key];
@@ -69,39 +97,42 @@ export default function SettingsModal({ open, onClose }: Props) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "agents", label: "Agents" },
     { id: "permissions", label: "Permissions" },
+    { id: "features", label: "Features" },
     { id: "timeouts", label: "Timeouts" },
     { id: "advanced", label: "Advanced" },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-lg mx-4 shadow-2xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
-          <h2 className="text-sm font-medium text-zinc-200">Settings</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
-            <X size={16} />
-          </button>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Settings"
+      className="max-w-lg h-[78vh]"
+      footer={(
+        <div className="flex flex-col gap-2">
+          {error && (
+            <p className="text-xs text-ui-danger px-1">{error}</p>
+          )}
+          <div className="flex items-center gap-2">
+            <Button onClick={handleSave} className="flex-1">
+              {Object.keys(dirty).length > 0 ? "Save & Close" : "Close"}
+            </Button>
+            <Button onClick={onClose} variant="ghost">Cancel</Button>
+          </div>
         </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 px-4 pt-3 shrink-0">
-          {tabs.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`px-3 py-1.5 rounded text-xs transition-colors ${
-                tab === t.id ? "bg-zinc-700 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-          {loading && <p className="text-xs text-zinc-500">Loading...</p>}
+      )}
+    >
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        onClick={(e) => e.stopPropagation()}
+        className="h-full flex flex-col"
+      >
+        <Tabs items={tabs} value={tab} onChange={setTab} className="pb-3 shrink-0" />
+        <div className="space-y-4 flex-1 min-h-0 overflow-y-auto pr-1">
+          {loading && <p className="text-xs text-ui-subtle">Loading...</p>}
 
           {!loading && tab === "agents" && (
             <>
@@ -111,45 +142,41 @@ export default function SettingsModal({ open, onClose }: Props) {
                 const model = getValue(modelKey) as string | null;
                 const prompt = getValue(promptKey) as string | null;
                 return (
-                  <div key={type} className="p-3 rounded-lg bg-zinc-800/50 border border-zinc-800 space-y-2">
+                  <Panel key={type} className="space-y-2 bg-ui-elevated">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-zinc-300 capitalize">{type}</span>
+                      <span className="text-xs font-medium text-ui capitalize">{type}</span>
                     </div>
                     <div>
-                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Model</label>
+                      <label className="text-[10px] text-ui-subtle uppercase tracking-wide">Model</label>
                       <div className="flex items-center gap-1">
-                        <input
+                        <Input
                           type="text"
                           value={model || ""}
                           onChange={(e) => setField(modelKey, e.target.value || null)}
                           placeholder="CLI default"
-                          className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                          className="flex-1 text-xs"
                         />
                         {model && (
-                          <button onClick={() => handleReset(modelKey)} className="p-1 text-zinc-500 hover:text-zinc-300" title="Reset to default">
-                            <RotateCcw size={12} />
-                          </button>
+                          <Button onClick={() => handleReset(modelKey)} variant="ghost" size="sm" title="Reset to default" icon={<RotateCcw size={12} />} />
                         )}
                       </div>
                     </div>
                     <div>
-                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Base System Prompt</label>
+                      <label className="text-[10px] text-ui-subtle uppercase tracking-wide">Base System Prompt</label>
                       <div className="flex items-start gap-1">
-                        <textarea
+                        <Textarea
                           value={prompt || ""}
                           onChange={(e) => setField(promptKey, e.target.value || null)}
                           placeholder="Default prompt"
                           rows={3}
-                          className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 font-mono resize-y"
+                          className="flex-1 text-xs font-mono"
                         />
                         {prompt && (
-                          <button onClick={() => handleReset(promptKey)} className="p-1 text-zinc-500 hover:text-zinc-300 mt-0.5" title="Reset to default">
-                            <RotateCcw size={12} />
-                          </button>
+                          <Button onClick={() => handleReset(promptKey)} variant="ghost" size="sm" className="mt-0.5" title="Reset to default" icon={<RotateCcw size={12} />} />
                         )}
                       </div>
                     </div>
-                  </div>
+                  </Panel>
                 );
               })}
             </>
@@ -161,32 +188,31 @@ export default function SettingsModal({ open, onClose }: Props) {
                 const key = `agents.${type}.permissions`;
                 const value = (getValue(key) as string) || "bypass";
                 return (
-                  <div key={type} className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <label className="text-xs text-zinc-300 capitalize">{type}</label>
-                      <p className="text-[10px] text-zinc-600">
-                        {type === "codex" ? "Policy-based only (no per-tool blocking)" : "Permission mode for tool use"}
-                      </p>
-                    </div>
-                    <select
+                  <FieldRow
+                    key={type}
+                    label={type}
+                    description={type === "codex" ? "Policy-based only (no per-tool blocking)" : "Permission mode for tool use"}
+                    className="capitalize"
+                    control={(
+                    <Select
                       value={value}
                       onChange={(e) => setField(key, e.target.value)}
-                      className="w-32 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
+                      className="w-32"
                     >
                       <option value="bypass">Bypass All</option>
                       <option value="auto">Auto (Smart)</option>
                       <option value="manual">Ask User</option>
-                    </select>
-                  </div>
+                    </Select>
+                    )}
+                  />
                 );
               })}
-              <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <label className="text-xs text-zinc-300">Permission Timeout</label>
-                  <p className="text-[10px] text-zinc-600">Seconds before pending requests auto-deny (0 = no timeout)</p>
-                </div>
+              <FieldRow
+                label="Permission Timeout"
+                description="Seconds before pending requests auto-deny (0 = no timeout)"
+                control={(
                 <div className="flex items-center gap-1">
-                  <input
+                  <Input
                     type="number"
                     value={(() => {
                       const raw = getValue("permissions.timeout");
@@ -198,11 +224,12 @@ export default function SettingsModal({ open, onClose }: Props) {
                       const num = Number(raw);
                       if (!Number.isNaN(num)) setField("permissions.timeout", num);
                     }}
-                    className="w-20 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 text-right focus:outline-none focus:border-zinc-500"
+                    className="w-20 text-xs text-right"
                   />
-                  <span className="text-[10px] text-zinc-500 w-3">s</span>
+                  <span className="text-[10px] text-ui-subtle w-3">s</span>
                 </div>
-              </div>
+                )}
+              />
             </>
           )}
 
@@ -217,13 +244,9 @@ export default function SettingsModal({ open, onClose }: Props) {
                 const rawValue = getValue(key);
                 const inputValue = typeof rawValue === "string" || typeof rawValue === "number" ? rawValue : rawValue ?? "";
                 return (
-                <div key={key} className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <label className="text-xs text-zinc-300">{label}</label>
-                    <p className="text-[10px] text-zinc-600">{desc}</p>
-                  </div>
+                <FieldRow key={key} label={label} description={desc} control={(
                   <div className="flex items-center gap-1">
-                    <input
+                    <Input
                       type="number"
                       value={inputValue as string | number}
                       onChange={(e) => {
@@ -236,13 +259,120 @@ export default function SettingsModal({ open, onClose }: Props) {
                         if (Number.isNaN(num)) return;
                         setField(key, num);
                       }}
-                      className="w-20 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 text-right focus:outline-none focus:border-zinc-500"
+                      className="w-20 text-xs text-right"
                     />
-                    <span className="text-[10px] text-zinc-500 w-3">{unit}</span>
+                    <span className="text-[10px] text-ui-subtle w-3">{unit}</span>
                   </div>
-                </div>
+                )} />
               );
               })}
+            </>
+          )}
+
+          {!loading && tab === "features" && (
+            <>
+              <Panel className="space-y-3 bg-ui-elevated">
+                <div className="pb-2 border-b border-ui">
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] text-ui-subtle uppercase tracking-wide">Layout</p>
+                    <span className="inline-flex items-center rounded-full border border-ui-warn-soft bg-ui-warn-soft px-2 py-0.5 text-[9px] font-mono uppercase tracking-[0.08em] text-ui-warn">
+                      Deprecated
+                    </span>
+                  </div>
+                </div>
+                <FieldRow
+                  label="Enable Split Layout"
+                  description="Disable to force chat-only mode for all users."
+                  control={(
+                    <div className="flex items-center gap-2">
+                      <Switch checked={getValue("ui.layout.split_enabled") !== false} onChange={(next) => setField("ui.layout.split_enabled", next)} />
+                      <Button onClick={() => handleReset("ui.layout.split_enabled")} variant="ghost" size="sm" title="Reset to default" icon={<RotateCcw size={12} />} />
+                    </div>
+                  )}
+                />
+
+                <FieldRow
+                  label="Allow Layout Switching"
+                  description="Show or hide the Split/Chat toggle in the header."
+                  control={(
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={getValue("ui.layout.allow_switch") !== false}
+                        onChange={(next) => setField("ui.layout.allow_switch", next)}
+                        disabled={getValue("ui.layout.split_enabled") === false}
+                      />
+                      <Button onClick={() => handleReset("ui.layout.allow_switch")} variant="ghost" size="sm" title="Reset to default" icon={<RotateCcw size={12} />} />
+                    </div>
+                  )}
+                />
+
+                <FieldRow label="Default Layout" description="Layout used when switching is disabled." control={(
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={(getValue("ui.layout.default") as string) === "chat" ? "chat" : "split"}
+                      onChange={(e) => setField("ui.layout.default", e.target.value)}
+                      disabled={getValue("ui.layout.split_enabled") === false}
+                      className="w-28"
+                    >
+                      <option value="split">Split</option>
+                      <option value="chat">Chat</option>
+                    </Select>
+                    <Button onClick={() => handleReset("ui.layout.default")} variant="ghost" size="sm" title="Reset to default" icon={<RotateCcw size={12} />} />
+                  </div>
+                )} />
+              </Panel>
+              <Panel className="space-y-3 bg-ui-elevated">
+                <div className="pb-2 border-b border-ui">
+                  <p className="text-[10px] text-ui-subtle uppercase tracking-wide">Appearance</p>
+                </div>
+                <FieldRow label="Theme Mode" description="Choose dark, light, or follow system." control={(
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={(() => {
+                        const raw = getValue("ui.theme.mode");
+                        return raw === "light" || raw === "system" ? raw : "dark";
+                      })()}
+                      onChange={(e) => setField("ui.theme.mode", e.target.value)}
+                      className="w-28"
+                    >
+                      <option value="dark">Dark</option>
+                      <option value="light">Light</option>
+                      <option value="system">System</option>
+                    </Select>
+                    <Button onClick={() => handleReset("ui.theme.mode")} variant="ghost" size="sm" title="Reset to default" icon={<RotateCcw size={12} />} />
+                  </div>
+                )} />
+                <FieldRow label="Accent" description="Primary accent for highlights and actions." control={(
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={(() => {
+                        const raw = getValue("ui.theme.accent");
+                        return raw === "emerald" || raw === "amber" ? raw : "cyan";
+                      })()}
+                      onChange={(e) => setField("ui.theme.accent", e.target.value)}
+                      className="w-28"
+                    >
+                      <option value="cyan">Cyan</option>
+                      <option value="emerald">Emerald</option>
+                      <option value="amber">Amber</option>
+                    </Select>
+                    <Button onClick={() => handleReset("ui.theme.accent")} variant="ghost" size="sm" title="Reset to default" icon={<RotateCcw size={12} />} />
+                  </div>
+                )} />
+                <FieldRow label="Density" description="Compact packs more content; cozy adds breathing room." control={(
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={(getValue("ui.theme.density") as string) === "compact" ? "compact" : "cozy"}
+                      onChange={(e) => setField("ui.theme.density", e.target.value)}
+                      className="w-28"
+                    >
+                      <option value="compact">Compact</option>
+                      <option value="cozy">Cozy</option>
+                    </Select>
+                    <Button onClick={() => handleReset("ui.theme.density")} variant="ghost" size="sm" title="Reset to default" icon={<RotateCcw size={12} />} />
+                  </div>
+                )} />
+              </Panel>
             </>
           )}
 
@@ -256,12 +386,8 @@ export default function SettingsModal({ open, onClose }: Props) {
                 const rawValue = getValue(key);
                 const inputValue = typeof rawValue === "string" || typeof rawValue === "number" ? rawValue : rawValue ?? "";
                 return (
-                <div key={key} className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <label className="text-xs text-zinc-300">{label}</label>
-                    <p className="text-[10px] text-zinc-600">{desc}</p>
-                  </div>
-                  <input
+                <FieldRow key={key} label={label} description={desc} control={(
+                  <Input
                     type={type}
                     value={inputValue as string | number}
                     onChange={(e) => {
@@ -278,33 +404,15 @@ export default function SettingsModal({ open, onClose }: Props) {
                       }
                       setField(key, raw);
                     }}
-                    className="w-28 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 text-right focus:outline-none focus:border-zinc-500"
+                    className="w-28 text-xs text-right"
                   />
-                </div>
+                )} />
               );
               })}
             </>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="border-t border-zinc-800 px-4 py-3 flex flex-col gap-2 shrink-0">
-          {error && (
-            <p className="text-xs text-red-400 px-1">{error}</p>
-          )}
-          <div className="flex items-center gap-2">
-          <button
-            onClick={handleSave}
-            className="flex-1 px-3 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm text-zinc-200 transition-colors"
-          >
-            {Object.keys(dirty).length > 0 ? "Save & Close" : "Close"}
-          </button>
-          <button onClick={onClose} className="px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
-            Cancel
-          </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

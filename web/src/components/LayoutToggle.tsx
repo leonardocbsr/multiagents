@@ -1,4 +1,6 @@
 import { Columns3, MessageSquare } from "lucide-react";
+import { cn } from "../lib/cn";
+import { Button } from "./ui";
 
 export type LayoutMode = "unified" | "split";
 
@@ -8,32 +10,40 @@ interface Props {
 }
 
 export default function LayoutToggle({ mode, onChange }: Props) {
+  const baseClass = "flex items-center gap-1 px-2 py-1 text-[10px] border transition-colors";
+  const activeClass = "bg-ui-soft border-ui-strong text-ui-strong font-semibold";
+  const inactiveClass = "bg-ui-surface border-ui-soft text-ui-subtle hover:text-ui hover:bg-ui-elevated";
+
   return (
-    <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-md overflow-hidden">
-      <button
+    <div className="flex items-center ui-panel overflow-hidden p-0">
+      <Button
         onClick={() => onChange("split")}
-        className={`flex items-center gap-1 px-2 py-1 text-[10px] transition-colors ${
+        variant="ghost"
+        size="sm"
+        className={cn(baseClass,
           mode === "split"
-            ? "bg-zinc-700 text-zinc-200"
-            : "text-zinc-500 hover:text-zinc-300"
-        }`}
+            ? activeClass
+            : inactiveClass
+        )}
         title="Split view"
       >
         <Columns3 size={11} />
         Split
-      </button>
-      <button
+      </Button>
+      <Button
         onClick={() => onChange("unified")}
-        className={`flex items-center gap-1 px-2 py-1 text-[10px] transition-colors ${
+        variant="ghost"
+        size="sm"
+        className={cn(baseClass,
           mode === "unified"
-            ? "bg-zinc-700 text-zinc-200"
-            : "text-zinc-500 hover:text-zinc-300"
-        }`}
+            ? activeClass
+            : inactiveClass
+        )}
         title="Unified view"
       >
         <MessageSquare size={11} />
         Chat
-      </button>
+      </Button>
     </div>
   );
 }

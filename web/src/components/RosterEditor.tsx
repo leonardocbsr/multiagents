@@ -3,6 +3,7 @@ import { Plus, X } from "lucide-react";
 import { AgentIcon, AGENT_COLORS } from "./AgentIcons";
 import type { AgentInfo } from "../types";
 import { fetchSettings } from "../api";
+import { Button, Input, Modal, Panel, Select, Textarea } from "./ui";
 
 interface Props {
   open: boolean;
@@ -44,6 +45,7 @@ export default function RosterEditor({ open, defaultAgents, onStart, onClose }: 
   const [sessionConfig, setSessionConfig] = useState<Record<string, unknown>>({});
   const [settingsDefaults, setSettingsDefaults] = useState<Record<string, unknown>>({});
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [focusCycleTick, setFocusCycleTick] = useState(0);
 
   useEffect(() => {
     if (open) {
@@ -67,10 +69,22 @@ export default function RosterEditor({ open, defaultAgents, onStart, onClose }: 
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") handleClose();
+      if (e.key === "Tab") setFocusCycleTick((n) => n + 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, handleClose]);
+  useEffect(() => {
+    if (!open) return;
+    const root = document.querySelector('[data-roster-editor="true"]');
+    if (!root) return;
+    const focusable = root.querySelectorAll<HTMLElement>(
+      'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',
+    );
+    if (focusCycleTick === 0) {
+      focusable[0]?.focus();
+    }
+  }, [open, focusCycleTick]);
 
   const updateAgent = (index: number, patch: Partial<AgentInfo>) => {
     setAgents(prev => prev.map((a, i) => (i === index ? { ...a, ...patch } : a)));
@@ -170,202 +184,14 @@ export default function RosterEditor({ open, defaultAgents, onStart, onClose }: 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={handleClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-lg mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">Configure Agents</h2>
-          <button onClick={handleClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Agent rows */}
-        <div className="max-h-[50vh] overflow-y-auto px-4 py-3 space-y-3">
-          {agents.map((agent, index) => {
-            const isDuplicate = duplicates.has(index);
-            const isEmpty = !agent.name.trim();
-            const agentColor = AGENT_COLORS[agent.type] || "text-zinc-400";
-
-            return (
-              <div key={index} className="flex flex-col gap-2 p-3 rounded-lg bg-zinc-800/50 border border-zinc-800">
-                <div className="flex items-center gap-2">
-                  {/* Type select */}
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className={agentColor}>
-                      <AgentIcon agent={agent.type} size={14} />
-                    </span>
-                    <select
-                      value={agent.type}
-                      onChange={(e) => handleTypeChange(index, e.target.value)}
-                      className="bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500 appearance-none cursor-pointer"
-                    >
-                      {AGENT_TYPES.map(t => (
-                        <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Name input */}
-                  <input
-                    type="text"
-                    value={agent.name}
-                    onChange={(e) => updateAgent(index, { name: e.target.value })}
-                    placeholder="Agent name"
-                    className={`flex-1 min-w-0 px-2 py-1 bg-zinc-700 border rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500 ${
-                      isDuplicate || isEmpty ? "border-red-500/50" : "border-zinc-600"
-                    }`}
-                  />
-
-                  {/* Remove button */}
-                  <button
-                    onClick={() => removeAgent(index)}
-                    className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors shrink-0"
-                    title="Remove agent"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-
-                {/* Role input */}
-                <input
-                  type="text"
-                  value={agent.role}
-                  onChange={(e) => updateAgent(index, { role: e.target.value })}
-                  placeholder="Optional role description..."
-                  className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-                />
-
-                {/* Error messages */}
-                {isDuplicate && (
-                  <p className="text-[10px] text-red-400">Duplicate name</p>
-                )}
-                {isEmpty && (
-                  <p className="text-[10px] text-red-400">Name cannot be empty</p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Add agent button */}
-        <div className="px-4 pb-3">
-          <button
-            onClick={addAgent}
-            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
-          >
-            <Plus size={14} />
-            <span>Add Agent</span>
-          </button>
-        </div>
-
-        {/* Session-level config overrides */}
-        <details className="px-4 pb-3">
-          <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors">
-            Session Settings (Overrides)
-          </summary>
-          <div className="mt-2 space-y-3">
-            <p className="text-[10px] text-zinc-500">
-              Leave blank to use defaults.
-            </p>
-            {settingsError && (
-              <p className="text-[10px] text-yellow-400">{settingsError}</p>
-            )}
-
-            <div className="space-y-2">
-              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Agent Models</p>
-              {AGENT_TYPES.map(type => {
-                const key = `agents.${type}.model`;
-                return (
-                  <div key={key} className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-400 capitalize w-14">{type}</span>
-                    <input
-                      type="text"
-                      value={getResolvedText(key)}
-                      onChange={(e) => setTextOverride(key, e.target.value)}
-                      className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500"
-                    />
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Agent System Prompts</p>
-              {AGENT_TYPES.map(type => {
-                const key = `agents.${type}.system_prompt`;
-                return (
-                  <div key={key} className="flex items-start gap-2">
-                    <span className="text-xs text-zinc-400 capitalize w-14 pt-1">{type}</span>
-                    <textarea
-                      value={getResolvedText(key)}
-                      onChange={(e) => setTextOverride(key, e.target.value)}
-                      rows={2}
-                      className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500 font-mono resize-y"
-                    />
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Agent Permissions</p>
-              {AGENT_TYPES.map(type => {
-                const key = `agents.${type}.permissions`;
-                const defaultValue = String(getDefault(key) ?? "bypass");
-                const current = String(getResolved(key) ?? defaultValue);
-                return (
-                  <div key={key} className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-400 capitalize w-14">{type}</span>
-                    <select
-                      value={current}
-                      onChange={(e) => setSelectOverride(key, e.target.value)}
-                      className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
-                    >
-                      <option value="bypass">Bypass</option>
-                      <option value="auto">Auto</option>
-                      <option value="manual">Manual</option>
-                    </select>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Runtime</p>
-              {[
-                "timeouts.idle",
-                "timeouts.parse",
-                "timeouts.send",
-                "timeouts.hard",
-                "permissions.timeout",
-              ].map((key) => (
-                <div key={key} className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-400 w-32">{key}</span>
-                  <input
-                    type="number"
-                    value={getResolvedNumber(key)}
-                    onChange={(e) => setNumberOverride(key, e.target.value)}
-                    className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500"
-                  />
-                </div>
-              ))}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400 w-32">memory.model</span>
-                <input
-                  type="text"
-                  value={getResolvedText("memory.model")}
-                  onChange={(e) => setTextOverride("memory.model", e.target.value)}
-                  className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500"
-                />
-              </div>
-            </div>
-          </div>
-        </details>
-
-        {/* Footer */}
-        <div className="border-t border-zinc-800 px-4 py-3 flex items-center gap-2">
-          <button
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title="Create Session"
+      className="max-w-lg"
+      footer={(
+        <div className="flex items-center gap-2">
+          <Button
             onClick={() => {
               if (!canStart) return;
               const config = Object.fromEntries(
@@ -374,18 +200,225 @@ export default function RosterEditor({ open, defaultAgents, onStart, onClose }: 
               onStart(agents, Object.keys(config).length > 0 ? config : undefined);
             }}
             disabled={!canStart}
-            className="flex-1 px-3 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm text-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Start Chat
-          </button>
-          <button
-            onClick={handleClose}
-            className="px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
-          >
+            Create Session
+          </Button>
+          <Button onClick={handleClose} variant="ghost">
             Cancel
-          </button>
+          </Button>
         </div>
+      )}
+    >
+      <div
+        data-roster-editor="true"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Configure agents"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Agent rows */}
+        <div className="max-h-[50vh] overflow-y-auto space-y-3">
+          {agents.map((agent, index) => {
+            const isDuplicate = duplicates.has(index);
+            const isEmpty = !agent.name.trim();
+            const agentColor = AGENT_COLORS[agent.type] || "text-ui-muted";
+
+            return (
+              <Panel key={index} className="flex flex-col gap-2 bg-ui-elevated">
+                <div className="flex items-center gap-2">
+                  {/* Type select */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={agentColor}>
+                      <AgentIcon agent={agent.type} size={14} />
+                    </span>
+                    <Select
+                      value={agent.type}
+                      onChange={(e) => handleTypeChange(index, e.target.value)}
+                      className="text-xs appearance-none cursor-pointer"
+                    >
+                      {AGENT_TYPES.map(t => (
+                        <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  {/* Name input */}
+                  <Input
+                    type="text"
+                    value={agent.name}
+                    onChange={(e) => updateAgent(index, { name: e.target.value })}
+                    placeholder="Agent name"
+                    className={`flex-1 min-w-0 text-xs ${
+                      isDuplicate || isEmpty ? "border-ui-danger-soft" : "border-ui-strong"
+                    }`}
+                  />
+
+                  {/* Remove button */}
+                  <Button
+                    onClick={() => removeAgent(index)}
+                    variant="ghost"
+                    size="sm"
+                    className="p-1 text-ui-subtle hover:text-ui-danger hover:bg-ui-soft shrink-0"
+                    title="Remove agent"
+                    icon={<X size={14} />}
+                  >
+                    <span className="sr-only">Remove</span>
+                  </Button>
+                </div>
+
+                {/* Role input */}
+                <Input
+                  type="text"
+                  value={agent.role}
+                  onChange={(e) => updateAgent(index, { role: e.target.value })}
+                  placeholder="Optional role description..."
+                  className="w-full text-xs text-ui"
+                />
+
+                {/* Error messages */}
+                {isDuplicate && (
+                  <p className="text-[10px] text-ui-danger">Duplicate name</p>
+                )}
+                {isEmpty && (
+                  <p className="text-[10px] text-ui-danger">Name cannot be empty</p>
+                )}
+              </Panel>
+            );
+          })}
+        </div>
+
+        {/* Add agent button */}
+        <div className="pb-3">
+          <Button
+            onClick={addAgent}
+            variant="ghost"
+            size="sm"
+            className="text-ui-muted hover:text-ui"
+            icon={<Plus size={14} />}
+          >
+            <span>Add Agent</span>
+          </Button>
+        </div>
+
+        {/* Session-level config overrides */}
+        <details className="pb-3">
+          <summary className="text-xs text-ui-subtle cursor-pointer hover:text-ui transition-colors">
+            Session Settings (Overrides)
+          </summary>
+          <div className="mt-2 space-y-3">
+            <p className="text-[10px] text-ui-subtle">
+              Leave blank to use defaults.
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-ui-faint">
+                Active overrides: {Object.keys(sessionConfig).length}
+              </span>
+              <Button
+                type="button"
+                onClick={() => setSessionConfig({})}
+                variant="ghost"
+                size="sm"
+                className="text-[10px] text-ui-muted hover:text-ui"
+              >
+                Reset All Overrides
+              </Button>
+            </div>
+            {settingsError && (
+              <p className="text-[10px] text-ui-warn">{settingsError}</p>
+            )}
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-ui-muted uppercase tracking-wide">Agent Models</p>
+              {AGENT_TYPES.map(type => {
+                const key = `agents.${type}.model`;
+                return (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="text-xs text-ui-muted capitalize w-14">{type}</span>
+                    <Input
+                      type="text"
+                      value={getResolvedText(key)}
+                      onChange={(e) => setTextOverride(key, e.target.value)}
+                      className="flex-1 text-xs"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-ui-muted uppercase tracking-wide">Agent System Prompts</p>
+              {AGENT_TYPES.map(type => {
+                const key = `agents.${type}.system_prompt`;
+                return (
+                  <div key={key} className="flex items-start gap-2">
+                    <span className="text-xs text-ui-muted capitalize w-14 pt-1">{type}</span>
+                    <Textarea
+                      value={getResolvedText(key)}
+                      onChange={(e) => setTextOverride(key, e.target.value)}
+                      rows={2}
+                      className="flex-1 text-xs font-mono"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-ui-muted uppercase tracking-wide">Agent Permissions</p>
+              {AGENT_TYPES.map(type => {
+                const key = `agents.${type}.permissions`;
+                const defaultValue = String(getDefault(key) ?? "bypass");
+                const current = String(getResolved(key) ?? defaultValue);
+                return (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="text-xs text-ui-muted capitalize w-14">{type}</span>
+                    <Select
+                      value={current}
+                      onChange={(e) => setSelectOverride(key, e.target.value)}
+                      className="flex-1 text-xs"
+                    >
+                      <option value="bypass">Bypass</option>
+                      <option value="auto">Auto</option>
+                      <option value="manual">Manual</option>
+                    </Select>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-ui-muted uppercase tracking-wide">Runtime</p>
+              {[
+                "timeouts.idle",
+                "timeouts.parse",
+                "timeouts.send",
+                "timeouts.hard",
+                "permissions.timeout",
+              ].map((key) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="text-xs text-ui-muted w-32">{key}</span>
+                  <Input
+                    type="number"
+                    value={getResolvedNumber(key)}
+                    onChange={(e) => setNumberOverride(key, e.target.value)}
+                    className="flex-1 text-xs"
+                  />
+                </div>
+              ))}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-ui-muted w-32">memory.model</span>
+                <Input
+                  type="text"
+                  value={getResolvedText("memory.model")}
+                  onChange={(e) => setTextOverride("memory.model", e.target.value)}
+                  className="flex-1 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
-    </div>
+    </Modal>
   );
 }

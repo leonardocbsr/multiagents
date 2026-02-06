@@ -4,12 +4,21 @@ import AgentPanel from "./AgentPanel";
 
 interface Props {
   state: AppState;
-  expandedAgents: Set<string>;
+  selectedAgent: string | null;
+  onSelectAgent: (agent: string) => void;
   onToggleAgent: (agent: string) => void;
   onSendDM?: (agent: string, text: string) => void;
+  density?: "compact" | "comfortable";
 }
 
-export default function AgentPanels({ state, expandedAgents, onToggleAgent, onSendDM }: Props) {
+export default function AgentPanels({
+  state,
+  selectedAgent,
+  onSelectAgent,
+  onToggleAgent,
+  onSendDM,
+  density = "comfortable",
+}: Props) {
   const getMessageTimestamp = (createdAt: string): number => {
     const ts = Date.parse(createdAt);
     return Number.isFinite(ts) ? ts : 0;
@@ -41,24 +50,37 @@ export default function AgentPanels({ state, expandedAgents, onToggleAgent, onSe
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {orderedAgents.map((agentInfo) => (
-        <AgentPanel
-          key={agentInfo.name}
-          agent={agentInfo.name}
-          agentType={agentInfo.type}
-          messages={agentMessages[agentInfo.name] ?? []}
-          prompts={state.agentPrompts[agentInfo.name] ?? {}}
-          stream={
-            state.agentStatuses[agentInfo.name] === "streaming"
-              ? state.agentStreams[agentInfo.name]
-              : undefined
-          }
-          status={state.agentStatuses[agentInfo.name] ?? "idle"}
-          expanded={expandedAgents.has(agentInfo.name)}
-          onToggle={() => onToggleAgent(agentInfo.name)}
-          onSendDM={onSendDM ? (text) => onSendDM(agentInfo.name, text) : undefined}
-        />
-      ))}
+      <div className="h-11 px-4 border-b border-ui-soft shrink-0 flex items-center">
+        <span className="text-[10px] font-semibold font-mono text-ui-subtle uppercase tracking-[0.08em]">
+          Active Agents
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {orderedAgents.map((agentInfo) => (
+          <AgentPanel
+            key={agentInfo.name}
+            agent={agentInfo.name}
+            agentType={agentInfo.type}
+            messages={agentMessages[agentInfo.name] ?? []}
+            prompts={state.agentPrompts[agentInfo.name] ?? {}}
+            stream={
+              state.agentStatuses[agentInfo.name] === "streaming"
+                ? state.agentStreams[agentInfo.name]
+                : undefined
+            }
+            status={state.agentStatuses[agentInfo.name] ?? "idle"}
+            expanded={false}
+            selected={selectedAgent === agentInfo.name}
+            onToggle={() => {
+              onSelectAgent(agentInfo.name);
+              onToggleAgent(agentInfo.name);
+            }}
+            onSendDM={onSendDM ? (text) => onSendDM(agentInfo.name, text) : undefined}
+            density={density}
+          />
+        ))}
+      </div>
     </div>
   );
 }
+

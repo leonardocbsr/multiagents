@@ -25,13 +25,29 @@ def test_get_settings_returns_defaults(client):
     data = resp.json()
     assert data["timeouts.idle"] == 1800
     assert data["agents.enabled"] == ["claude", "codex", "kimi"]
+    assert data["ui.layout.default"] == "split"
+    assert data["ui.layout.allow_switch"] is True
+    assert data["ui.layout.split_enabled"] is True
+    assert data["ui.theme.mode"] == "dark"
+    assert data["ui.theme.accent"] == "cyan"
+    assert data["ui.theme.density"] == "cozy"
 
 
 def test_put_settings_bulk_update(client):
-    resp = client.put("/api/settings", json={"timeouts.idle": 900})
+    resp = client.put("/api/settings", json={
+        "timeouts.idle": 900,
+        "ui.layout.default": "chat",
+        "ui.theme.mode": "light",
+        "ui.theme.accent": "amber",
+        "ui.theme.density": "compact",
+    })
     assert resp.status_code == 200
     resp = client.get("/api/settings")
     assert resp.json()["timeouts.idle"] == 900
+    assert resp.json()["ui.layout.default"] == "chat"
+    assert resp.json()["ui.theme.mode"] == "light"
+    assert resp.json()["ui.theme.accent"] == "amber"
+    assert resp.json()["ui.theme.density"] == "compact"
 
 
 def test_get_single_setting(client):

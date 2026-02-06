@@ -92,8 +92,17 @@ def _parse_agents(raw: str) -> list[dict]:
     if not data:
         return []
     if isinstance(data[0], str):
-        return [{"name": name, "type": name, "role": ""} for name in data]
-    return data
+        return [{"name": name, "type": name, "role": "", "model": None} for name in data]
+    # Ensure newly required keys exist on older rows.
+    normalized: list[dict] = []
+    for item in data:
+        normalized.append({
+            "name": item.get("name", item.get("type", "")),
+            "type": item.get("type", ""),
+            "role": item.get("role", ""),
+            "model": item.get("model"),
+        })
+    return normalized
 
 
 class SessionStore:
@@ -195,9 +204,14 @@ class SessionStore:
         agents_data: list[dict] = []
         for item in agent_names:
             if isinstance(item, str):
-                agents_data.append({"name": item, "type": item, "role": ""})
+                agents_data.append({"name": item, "type": item, "role": "", "model": None})
             else:
-                agents_data.append(item)
+                agents_data.append({
+                    "name": item.get("name", item.get("type", "")),
+                    "type": item.get("type", ""),
+                    "role": item.get("role", ""),
+                    "model": item.get("model"),
+                })
         with self._lock:
             self._conn.execute(
                 "INSERT INTO sessions (id, title, agent_names, created_at, updated_at, working_dir, config) VALUES (?, ?, ?, ?, ?, ?, ?)",

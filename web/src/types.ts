@@ -2,6 +2,7 @@ export interface AgentInfo {
   name: string;
   type: string;  // "claude" | "codex" | "kimi"
   role: string;
+  model?: string | null;
 }
 
 export interface Settings {
@@ -20,6 +21,12 @@ export interface Settings {
   "memory.model": string;
   "server.warmup_ttl": number;
   "server.max_events": number;
+  "ui.layout.default": "split" | "chat";
+  "ui.layout.allow_switch": boolean;
+  "ui.layout.split_enabled": boolean;
+  "ui.theme.mode": "dark" | "light" | "system";
+  "ui.theme.accent": "cyan" | "emerald" | "amber";
+  "ui.theme.density": "compact" | "cozy";
   "agents.claude.permissions": "bypass" | "auto" | "manual";
   "agents.codex.permissions": "bypass" | "auto" | "manual";
   "agents.kimi.permissions": "bypass" | "auto" | "manual";
@@ -28,7 +35,7 @@ export interface Settings {
 
 export function normalizeAgents(agents: (string | AgentInfo)[]): AgentInfo[] {
   return agents.map(a =>
-    typeof a === "string" ? { name: a, type: a, role: "" } : a
+    typeof a === "string" ? { name: a, type: a, role: "", model: null } : { ...a, model: a.model ?? null }
   );
 }
 
@@ -114,7 +121,7 @@ export type ServerMessage = ServerEnvelope & (
   | { type: "connected"; agents: (string | AgentInfo)[] }
   | { type: "session_created"; session_id: string; agents: (string | AgentInfo)[] }
   | { type: "session_joined"; session_id: string; title: string; agents: (string | AgentInfo)[]; messages: Message[]; is_running: boolean; in_flight?: InFlightState | null; cards?: Card[] }
-  | { type: "agent_added"; name: string; agent_type: string; role: string }
+  | { type: "agent_added"; name: string; agent_type: string; role: string; model?: string | null }
   | { type: "agent_removed"; name: string }
   | { type: "title_changed"; title: string }
   | { type: "user_message"; text: string; created_at?: string }

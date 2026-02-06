@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 
 from ..agents.base import AgentNotice as BaseAgentNotice, AgentPermissionRequest, AgentResponse, BaseAgent
@@ -28,6 +29,8 @@ _PERSISTENT_REPLY_DIRECTIVE = (
     "Respond directly. Put all user-visible content inside <Share>...</Share>. "
     "If no action is needed, respond with exactly [PASS]."
 )
+_RELAY_DEDUP_COOLDOWN_SECONDS = 8.0
+_RELAY_DEDUP_MAX_ENTRIES = 2048
 
 
 class ChatRoom:
@@ -59,6 +62,7 @@ class ChatRoom:
         self._dm_debounce_timers: dict[str, asyncio.TimerHandle] = {}
         self._dm_debounce_texts: dict[str, list[str]] = {}
         self._inboxes: dict[str, asyncio.Queue[tuple[str, str, int | None]]] = {}
+        self._recent_relays: dict[tuple[str, str, str], float] = {}
 
     def add_agent(self, agent: BaseAgent) -> None:
         """Queue an agent to join. If a round is in progress, it joins immediately."""
@@ -144,6 +148,34 @@ class ChatRoom:
         inbox = self._inboxes.get(name)
         if inbox:
             inbox.put_nowait(("dm", text, None))
+
+    @staticmethod
+    def _normalize_relay_text(text: str) -> str:
+        return " ".join(text.split()).strip().lower()
+
+    def _prune_recent_relays(self, now: float) -> None:
+        cutoff = now - _RELAY_DEDUP_COOLDOWN_SECONDS
+        stale = [k for k, ts in self._recent_relays.items() if ts < cutoff]
+        for key in stale:
+            self._recent_relays.pop(key, None)
+        if len(self._recent_relays) <= _RELAY_DEDUP_MAX_ENTRIES:
+            return
+        # Keep most recent entries only.
+        ordered = sorted(self._recent_relays.items(), key=lambda item: item[1], reverse=True)
+        self._recent_relays = dict(ordered[:_RELAY_DEDUP_MAX_ENTRIES])
+
+    def _should_relay_share(self, sender: str, target: str, shareable: str) -> bool:
+        now = time.monotonic()
+        self._prune_recent_relays(now)
+        normalized = self._normalize_relay_text(shareable)
+        if not normalized:
+            return False
+        key = (sender.lower(), target.lower(), normalized)
+        last = self._recent_relays.get(key)
+        if last is not None and (now - last) < _RELAY_DEDUP_COOLDOWN_SECONDS:
+            return False
+        self._recent_relays[key] = now
+        return True
 
     def _format_persistent_prompt(
         self,
@@ -561,11 +593,12 @@ class ChatRoom:
                     if shareable and shareable != PLACEHOLDER:
                         for other in self.agents:
                             if other.name != agent.name:
-                                self._inboxes[other.name].put_nowait(
-                                    (agent.name, shareable, message_round)
-                                )
-                                # Wake up idle agents
-                                agent_idle[other.name] = False
+                                if self._should_relay_share(agent.name, other.name, shareable):
+                                    self._inboxes[other.name].put_nowait(
+                                        (agent.name, shareable, message_round)
+                                    )
+                                    # Wake up idle agents
+                                    agent_idle[other.name] = False
 
         # Start agent loops
         for agent in self.agents:
@@ -751,6 +784,7 @@ class ChatRoom:
             await asyncio.gather(*agent_tasks.values(), return_exceptions=True)
             self._stop_events = {}
             self._inboxes = {}
+            self._recent_relays = {}
 
     async def run(
         self, initial_prompt: str | None = None, start_round: int = 0,

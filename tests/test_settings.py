@@ -28,6 +28,12 @@ def test_get_all_returns_defaults_merged(tmp_path):
     all_settings = store.get_all()
     assert all_settings["agents.claude.model"] == "opus"
     assert all_settings["timeouts.idle"] == 1800
+    assert all_settings["ui.layout.default"] == "split"
+    assert all_settings["ui.layout.allow_switch"] is True
+    assert all_settings["ui.layout.split_enabled"] is True
+    assert all_settings["ui.theme.mode"] == "dark"
+    assert all_settings["ui.theme.accent"] == "cyan"
+    assert all_settings["ui.theme.density"] == "cozy"
 
 
 def test_set_many(tmp_path):
@@ -148,6 +154,32 @@ def test_memory_model_setting(tmp_path):
     assert store.get("memory.model") == "sonnet"
     effective = store.get_effective()
     assert effective["memory.model"] == "sonnet"
+
+
+def test_layout_feature_flags_can_be_overridden(tmp_path):
+    store = SettingsStore(tmp_path / "test.db")
+    store.set_many({
+        "ui.layout.default": "chat",
+        "ui.layout.allow_switch": False,
+        "ui.layout.split_enabled": False,
+    })
+    effective = store.get_effective()
+    assert effective["ui.layout.default"] == "chat"
+    assert effective["ui.layout.allow_switch"] is False
+    assert effective["ui.layout.split_enabled"] is False
+
+
+def test_theme_feature_flags_can_be_overridden(tmp_path):
+    store = SettingsStore(tmp_path / "test.db")
+    store.set_many({
+        "ui.theme.mode": "light",
+        "ui.theme.accent": "amber",
+        "ui.theme.density": "compact",
+    })
+    effective = store.get_effective()
+    assert effective["ui.theme.mode"] == "light"
+    assert effective["ui.theme.accent"] == "amber"
+    assert effective["ui.theme.density"] == "compact"
 
 
 def test_timeout_config_applied_to_agents():

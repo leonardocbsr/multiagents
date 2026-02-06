@@ -152,6 +152,7 @@ class MultiAgentsBot(discord.Client):
             log.exception("Failed to start session for thread %s", thread.id)
             await bridge.close()
             self._bridges.pop(thread.id, None)
+            self._thread_participants.pop(thread.id, None)
             await thread.send("Failed to start session.")
             return
 

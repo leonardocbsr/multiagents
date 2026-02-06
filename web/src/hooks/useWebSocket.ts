@@ -43,7 +43,7 @@ type Action =
   | { type: "reconnect_cleared" }
   | { type: "reconnect_exhausted" }
   | { type: "reconnect_tick"; remainingMs: number }
-  | { type: "remove_permission"; requestId: string };
+  | { type: "remove_permission"; requestId: string; agent?: string };
 
 function reducer(state: AppState, action: Action): AppState {
   if (action.type === "reset") return { ...INITIAL_STATE };
@@ -70,7 +70,15 @@ function reducer(state: AppState, action: Action): AppState {
     return { ...state, reconnectInMs: action.remainingMs };
   }
   if (action.type === "remove_permission") {
-    return { ...state, pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== action.requestId) };
+    return {
+      ...state,
+      pendingPermissions: state.pendingPermissions.filter((p) => {
+        if (action.agent) {
+          return !(p.request_id === action.requestId && p.agent === action.agent);
+        }
+        return p.request_id !== action.requestId;
+      }),
+    };
   }
 
   const msg = action.msg;
@@ -286,7 +294,7 @@ function reducer(state: AppState, action: Action): AppState {
     }
 
     case "permission_request":
-      if (state.pendingPermissions.some((p) => p.request_id === msg.request_id)) {
+      if (state.pendingPermissions.some((p) => p.request_id === msg.request_id && p.agent === msg.agent)) {
         return state;
       }
       return {
@@ -532,7 +540,7 @@ export function useWebSocket(onSendFailure?: (msgType: string) => void) {
   const respondToPermission = useCallback((requestId: string, approved: boolean, agent?: string) => {
     const sent = send({ type: "permission_response", request_id: requestId, approved, agent });
     if (sent) {
-      dispatch({ type: "remove_permission", requestId });
+      dispatch({ type: "remove_permission", requestId, agent });
     }
   }, [send]);
 

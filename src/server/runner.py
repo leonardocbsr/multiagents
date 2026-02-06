@@ -50,9 +50,7 @@ def _format_card_system_message(data: dict) -> str | None:
     if event_type == "card_created" and isinstance(card, dict):
         return f"Task card created: [{card.get('id', '?')}] {card.get('title', '(untitled)')}"
     if event_type == "card_updated" and isinstance(card, dict):
-        status = card.get("status")
-        suffix = f" (status: {status})" if status else ""
-        return f"Task card updated: [{card.get('id', '?')}] {card.get('title', '(untitled)')}{suffix}"
+        return "Task board updated — use `multiagents-cards list` to see current state."
     if event_type == "card_deleted":
         return f"Task card deleted: {data.get('card_id', '?')}"
     if event_type == "card_phase_started" and isinstance(card, dict):
@@ -129,6 +127,8 @@ class SessionRunner:
         # Delegation tracking: collect agent responses during delegation rounds
         self._delegation_cards: dict[str, str] = {}  # session_id -> card_id
         self._delegation_responses: dict[str, dict[str, str]] = {}  # session_id -> {agent: response}
+        # Debounce card system notifications (session_id -> monotonic timestamp)
+        self._last_card_notify: dict[str, float] = {}
 
     def subscribe(self, session_id: str, ws: WebSocket) -> None:
         self._subscribers.setdefault(session_id, set()).add(ws)
@@ -221,9 +221,13 @@ class SessionRunner:
     async def broadcast(self, session_id: str, data: dict) -> int:
         card_message = _format_card_system_message(data)
         if card_message:
-            room = self._rooms.get(session_id)
-            if room:
-                room.inject_system_message(card_message)
+            now = time.monotonic()
+            last = self._last_card_notify.get(session_id, 0.0)
+            if now - last >= 5.0:
+                room = self._rooms.get(session_id)
+                if room:
+                    room.inject_system_message(card_message)
+                self._last_card_notify[session_id] = now
 
         subs = self._subscribers.get(session_id)
         if "event_id" not in data:
@@ -522,6 +526,7 @@ class SessionRunner:
         """Clean up warmed agents for a session."""
         self._cancel_idle_cleanup(session_id)
         self._session_send_timeouts.pop(session_id, None)
+        self._last_card_notify.pop(session_id, None)
         if cancel_card_phase_tasks:
             self._cancel_next_card_phase(session_id)
         # Cancel any pending warmup

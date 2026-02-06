@@ -27,6 +27,13 @@ cd web && pnpm dev                        # Dev server (port 5174, proxies to ba
 cd web && pnpm build                      # Production build to web/dist/
 ```
 
+### Setup
+
+```bash
+./setup.sh                               # First-time setup: venv, deps, CLI validation
+multiagents init                         # Initialize .multiagents/ dir for memory
+```
+
 ### Full Stack
 
 ```bash
@@ -38,13 +45,19 @@ cd web && pnpm build                      # Production build to web/dist/
 
 ### Backend (`src/`)
 
-Three layers: **agents** spawn and stream from external CLI tools, **chat** orchestrates event-driven messaging with round settlement, **server** handles WebSocket connections and persistence.
+Five layers: **agents** spawn and stream from external CLI tools via protocol adapters, **chat** orchestrates event-driven messaging with round settlement, **memory** provides cross-session learning, **cards** runs kanban workflows, **server** handles WebSocket connections and persistence.
 
-**Agent layer** (`src/agents/`): Each agent (Claude, Codex, Kimi) inherits `BaseAgent` and wraps an external CLI. Agents spawn async subprocesses that emit JSON lines. Key override points: `_build_args()`, `_parse_stream_line()`, `_parse_output()`, `_extract_session_id()`. Agents support session resumption via persisted CLI session IDs.
+**Agent layer** (`src/agents/`): Each agent (Claude, Codex, Kimi) inherits `BaseAgent` and wraps an external CLI. `PersistentAgent` (`persistent.py`) manages long-lived subprocesses with bidirectional stdio, crash recovery (exponential backoff, max 3 retries), and session ID tracking for resume. Key override points on `BaseAgent`: `_build_persistent_args()`, `_build_persistent_resume_args()`, `_get_protocol()`, `_get_cwd()`.
 
-**Chat layer** (`src/chat/`): `ChatRoom` runs persistent event loops as an async generator yielding typed `ChatEvent` dataclasses (`RoundStarted`, `AgentStreamChunk`, `AgentCompleted`, `RoundEnded`, `RoundPaused`, `AgentInterrupted`). `router.py` handles prompt formatting helpers, `[PASS]` detection, coordination pattern extraction, and `<Share>` tag protocol.
+**Protocol adapters** (`src/agents/protocols/`): Each CLI has a dedicated `ProtocolAdapter` subclass (`ClaudeProtocol`, `CodexProtocol`, `KimiProtocol`) that translates wire-level JSON into common event types (`TextDelta`, `ThinkingDelta`, `ToolBadge`, `TurnComplete`). Interface: `send_message()`, `read_events()`, `cancel()`, `shutdown()`.
 
-**Server layer** (`src/server/`): FastAPI app with WebSocket at `/ws` and REST at `/api/sessions`. `SessionRunner` manages per-session chat tasks, WebSocket subscriber broadcast, and pre-warmed agent pools. `SessionStore` uses SQLite with WAL mode at `~/.multiagents/multiagents.db`.
+**Chat layer** (`src/chat/`): `ChatRoom` runs persistent event loops as an async generator yielding typed `ChatEvent` dataclasses (`RoundStarted`, `AgentStreamChunk`, `AgentCompleted`, `RoundEnded`, `RoundPaused`, `AgentInterrupted`). `router.py` handles prompt formatting helpers, `[PASS]` detection, coordination pattern extraction, and `<Share>` tag protocol. Also: DM debouncing (500ms coalesce in `_dm_debounce_timers`), per-agent inbox queues (`_inboxes`) for targeted message delivery during rounds.
+
+**Memory layer** (`src/memory/`): Cross-session learning system. `MemoryStore` persists to project-local `.multiagents/memory.db`. `MemoryManager` extracts insights via LLM (Haiku). `SessionRecorder` captures session data. `build_memory_context()` injects agent profiles into prompts.
+
+**Cards layer** (`src/cards/`): Kanban workflow engine with role delegation parsing, `[DONE]` detection, and phase transitions. CLI utility at `scripts/multiagents-cards`.
+
+**Server layer** (`src/server/`): FastAPI app with WebSocket at `/ws` and REST at `/api/sessions`. `SessionRunner` manages per-session chat tasks, WebSocket subscriber broadcast, and pre-warmed agent pools (agents spawned in advance with 300s TTL via `warmup_agents()`). `SessionStore` uses SQLite with WAL mode. `SettingsStore` manages runtime config in the same database.
 
 ### Frontend (`web/src/`)
 
@@ -70,6 +83,8 @@ pytest with `asyncio_mode = "auto"`. Tests use `FakeAgent` mocks (defined in tes
 - Frontend dev port: **5174** (Vite proxies `/ws` and `/api` to backend)
 - Production: set `STATIC_DIR` env var to serve `web/dist/` from backend
 - Required external CLIs: `claude`, `codex`, `kimi` (must be in `$PATH`)
-- Database: `~/.multiagents/multiagents.db` (SQLite, WAL mode)
+- Session database: `~/.multiagents/multiagents.db` (SQLite, WAL mode — sessions + settings)
+- Memory database: `<project>/.multiagents/memory.db` (SQLite — cross-session learning)
 - Agent work dirs: `/tmp/multiagents-<agent>-<uuid>/`
+- Kimi generates temp agent YAML + prompt files in `/tmp/multiagents-kimi-agent-*/`
 - **Important**: Agents must use **absolute paths** (e.g., `/path/to/repo/...`) to access project files, as their CWD is isolated.

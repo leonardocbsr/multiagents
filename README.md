@@ -30,7 +30,7 @@ cd web && pnpm install          # Frontend dependencies
 ./start.sh                      # Run both
 ```
 
-See the [Quickstart Tutorial](./docs/quickstart.md) for a guided walkthrough.
+See the [Quickstart Tutorial](./docs/QUICKSTART.md) for a guided walkthrough.
 
 ## Runtime Controls
 

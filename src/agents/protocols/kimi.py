@@ -19,7 +19,7 @@ import logging
 import re
 from typing import AsyncIterator
 
-from .base import AgentEvent, PermissionRequest, PermissionResponse, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, TurnComplete
+from .base import AgentEvent, PermissionRequest, PermissionResponse, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, ToolOutput, ToolResult, TurnComplete
 from ..base import _extract_tool_detail
 
 log = logging.getLogger("multiagents")
@@ -229,6 +229,7 @@ class KimiProtocol(ProtocolAdapter):
             # Step interrupted
             if method_norm in {"stepinterrupted", "step_interrupted", "step/interrupted"}:
                 log.info("[kimi-proto] step interrupted")
+                yield ToolBadge(label="Interrupted", detail="")
                 continue
 
             # Context compaction
@@ -239,6 +240,7 @@ class KimiProtocol(ProtocolAdapter):
 
             if method_norm in {"compactionend", "compaction_end", "compaction/end"}:
                 log.info("[kimi-proto] context compaction ended")
+                yield ToolBadge(label="Compacted", detail="done")
                 continue
 
             # Status update (context usage, token usage)
@@ -264,7 +266,11 @@ class KimiProtocol(ProtocolAdapter):
 
             # Tool call part — streaming tool arguments
             if method_norm in {"toolcallpart", "tool_call_part", "tool/call/part"}:
-                # Streaming arguments, no visible output needed
+                if isinstance(params, dict):
+                    fn = params.get("function", {})
+                    args_delta = fn.get("arguments", "") if isinstance(fn, dict) else ""
+                    if args_delta:
+                        yield ToolOutput(tool_name="args", text=args_delta[:500])
                 continue
 
             # Tool result event
@@ -272,9 +278,11 @@ class KimiProtocol(ProtocolAdapter):
                 if isinstance(params, dict):
                     ret = params.get("return_value", {})
                     is_err = ret.get("is_error", False) if isinstance(ret, dict) else False
+                    output = ret.get("output", "") if isinstance(ret, dict) else ""
                     tool_id = params.get("tool_call_id", "")
                     if is_err:
                         log.debug("[kimi-proto] tool result error tool_call_id=%s", tool_id)
+                    yield ToolResult(tool_name=tool_id, success=not is_err, output=str(output)[:300])
                 continue
 
             # Approval response (agent confirming an approval)

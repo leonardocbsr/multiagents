@@ -19,7 +19,7 @@ import logging
 import re
 from typing import AsyncIterator
 
-from .base import AgentEvent, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, TurnComplete
+from .base import AgentEvent, PermissionRequest, PermissionResponse, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, TurnComplete
 from ..base import _extract_tool_detail
 
 log = logging.getLogger("multiagents")
@@ -32,10 +32,17 @@ class KimiProtocol(ProtocolAdapter):
 
     _session_id: str | None = None
 
-    def __init__(self) -> None:
+    def __init__(self, permission_mode: str = "bypass") -> None:
         self._id_counter = 0
         self._last_prompt_id: str | None = None
         self._initialized = False
+        self._permission_mode = permission_mode
+        self._pending_permissions: dict[str, asyncio.Future] = {}
+
+    async def respond_to_permission(self, response: PermissionResponse) -> None:
+        future = self._pending_permissions.pop(response.request_id, None)
+        if future and not future.done():
+            future.set_result(response)
 
     def _next_id(self) -> str:
         self._id_counter += 1
@@ -154,9 +161,34 @@ class KimiProtocol(ProtocolAdapter):
                 if req_id is not None:
                     if req_type == "ApprovalRequest":
                         response_id = payload.get("id") or payload.get("request_id") or ""
-                        await self._send_response(req_id, {"request_id": response_id, "response": "approve"})
-                        log.info("[kimi-proto] auto-approved request id=%s", response_id)
-                        yield ToolBadge(label="Approved", detail="")
+                        if self._permission_mode == "bypass":
+                            await self._send_response(req_id, {"request_id": response_id, "response": "approve"})
+                            log.info("[kimi-proto] auto-approved request id=%s", response_id)
+                            yield ToolBadge(label="Approved", detail="")
+                        else:
+                            perm_id = str(response_id)
+                            # Register Future BEFORE yielding so that a fast
+                            # respond_to_permission() call doesn't race and get
+                            # silently dropped.
+                            future: asyncio.Future = asyncio.get_running_loop().create_future()
+                            self._pending_permissions[perm_id] = future
+                            yield PermissionRequest(
+                                request_id=perm_id,
+                                tool_name=payload.get("action", "unknown"),
+                                tool_input=payload,
+                                description=payload.get("description", ""),
+                            )
+                            try:
+                                perm_response = await asyncio.wait_for(future, timeout=120.0)
+                                decision = "approve" if perm_response.approved else "reject"
+                            except asyncio.TimeoutError:
+                                decision = "reject"  # fail-closed: deny on timeout
+                                self._pending_permissions.pop(perm_id, None)
+                                log.warning("[kimi-proto] permission timed out, denying request id=%s", response_id)
+                            await self._send_response(req_id, {"request_id": response_id, "response": decision})
+                            label = "Approved" if decision == "approve" else "Denied"
+                            log.info("[kimi-proto] permission %s request id=%s", label.lower(), response_id)
+                            yield ToolBadge(label=label, detail="")
                     elif req_type == "ToolCallRequest":
                         tool_call_id = payload.get("id") or payload.get("tool_call_id") or ""
                         await self._send_response(

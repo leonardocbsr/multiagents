@@ -138,6 +138,33 @@ async def test_stop_command_with_session(bot):
     assert thread_id not in bot._bridges
 
 
+async def test_stop_session_cancels_listener_before_user_message(bot):
+    """_stop_session should cancel/await listener before posting stop confirmation."""
+    thread_id = 66666
+    channel = MagicMock()
+    channel.id = thread_id
+    channel.send = AsyncMock()
+    channel.edit = AsyncMock()
+
+    listener_cancelled = asyncio.Event()
+
+    async def listener_task():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            listener_cancelled.set()
+            raise
+
+    listener = asyncio.create_task(listener_task())
+    bot._listeners[thread_id] = listener
+    bot._bridges[thread_id] = AsyncMock()
+
+    await bot._stop_session(channel)
+
+    assert listener_cancelled.is_set() or listener.cancelled()
+    channel.send.assert_called_once_with("Session stopped.")
+
+
 async def test_start_session_post_connect_failure(bot):
     """If send_message fails after connect, state is cleaned up."""
     thread = MagicMock()

@@ -10,6 +10,7 @@ from .protocols.kimi import KimiProtocol
 class KimiAgent(BaseAgent):
     name = "kimi"
     agent_type = "kimi"
+    permission_mode: str = "bypass"
     _agent_dir: str | None = None
 
     _cached_model: str | None = None
@@ -59,22 +60,28 @@ class KimiAgent(BaseAgent):
     def _build_persistent_args(self) -> list[str]:
         if self.session_id is None:
             self.session_id = str(uuid.uuid4())
-        return [
-            "kimi", "--wire", "--yolo",
+        args = ["kimi", "--wire"]
+        if self.permission_mode == "bypass":
+            args.append("--yolo")
+        args.extend([
             "--agent-file", self._ensure_agent_file(),
             "--session", self.session_id,
-        ]
+        ])
+        return args
 
     def _build_persistent_resume_args(self, session_id: str) -> list[str]:
         sid = session_id or self.session_id
         if sid is None:
             sid = str(uuid.uuid4())
         self.session_id = sid
-        return [
-            "kimi", "--wire", "--yolo",
+        args = ["kimi", "--wire"]
+        if self.permission_mode == "bypass":
+            args.append("--yolo")
+        args.extend([
             "--agent-file", self._ensure_agent_file(),
             "--session", sid,
-        ]
+        ])
+        return args
 
     def _get_protocol(self) -> KimiProtocol:
-        return KimiProtocol()
+        return KimiProtocol(permission_mode=self.permission_mode)

@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 
@@ -9,19 +10,30 @@ _CLAUDE_BASE_FLAGS = [
     "--verbose",
     "--output-format", "stream-json",
     "--disable-slash-commands",
-    "--setting-sources", "",
-    "--dangerously-skip-permissions",
 ]
 
 
 class ClaudeAgent(BaseAgent):
     name = "claude"
     agent_type = "claude"
+    permission_mode: str = "bypass"
 
     def _cli_flags(self) -> list[str]:
         flags = ["--system-prompt", build_agent_system_prompt(self.project_dir, self.system_prompt_override, agent_name=self.name), *_CLAUDE_BASE_FLAGS]
         if self.model:
             flags.extend(["--model", self.model])
+
+        if self.permission_mode == "bypass":
+            flags.extend(["--setting-sources", "", "--dangerously-skip-permissions"])
+        else:
+            # Use dontAsk mode — auto-denies unless pre-approved
+            flags.extend(["--setting-sources", "", "--permission-mode", "dontAsk"])
+            if self.permission_mode == "auto":
+                # Pre-approve read-only tools
+                flags.extend(["--settings", json.dumps({
+                    "permissions": {"allow": ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]}
+                })])
+            # In "manual" mode, no pre-approvals — everything gets denied and forwarded to user
         return flags
 
     def _get_cwd(self) -> str:

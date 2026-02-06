@@ -19,7 +19,7 @@ import json
 import logging
 from typing import AsyncIterator
 
-from .base import AgentEvent, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, TurnComplete
+from .base import AgentEvent, PermissionRequest, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, TurnComplete
 from ..base import _extract_tool_detail
 
 log = logging.getLogger("multiagents")
@@ -93,6 +93,16 @@ class ClaudeProtocol(ProtocolAdapter):
                     )
                 else:
                     log.info("[claude-proto] turn complete session_id=%s", self._session_id)
+
+                # Yield permission denials as events BEFORE TurnComplete
+                for denial in obj.get("permission_denials", []):
+                    yield PermissionRequest(
+                        request_id=denial.get("tool_use_id", ""),
+                        tool_name=denial.get("tool_name", ""),
+                        tool_input=denial.get("tool_input", {}),
+                        description=f"Claude wants to use {denial.get('tool_name', 'unknown')}",
+                    )
+
                 yield TurnComplete(
                     text=obj.get("result", ""),
                     session_id=self._session_id,

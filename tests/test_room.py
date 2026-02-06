@@ -353,7 +353,7 @@ class PersistentSlowAgent:
 
 
 @pytest.mark.asyncio
-async def test_persistent_restart_cancels_turn_and_runs_dm():
+async def test_persistent_restart_runs_dm_without_cancel():
     agent = PersistentSlowAgent("claude")
     room = ChatRoom([agent])
 
@@ -369,17 +369,16 @@ async def test_persistent_restart_cancels_turn_and_runs_dm():
         events.append(event)
         completed = [e for e in events if isinstance(e, AgentCompleted)]
         prompts = [e for e in events if isinstance(e, AgentPromptAssembled)]
-        has_stopped = any(e.stopped for e in completed)
         has_passed = any(e.passed for e in completed)
         has_dm_prompt = any("## Direct Message from User" in e.sections.get("message", "") for e in prompts)
-        if has_stopped and has_passed and has_dm_prompt:
+        if has_passed and has_dm_prompt:
             break
 
     completed = [e for e in events if isinstance(e, AgentCompleted)]
     prompts = [e for e in events if isinstance(e, AgentPromptAssembled)]
-    assert any(e.stopped for e in completed)
+    assert not any(e.stopped for e in completed)
     assert any(e.passed for e in completed)
-    assert agent.cancel_calls >= 1
+    assert agent.cancel_calls == 0
     assert any("## Direct Message from User" in e.sections.get("message", "") for e in prompts)
 
 

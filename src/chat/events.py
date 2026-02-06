@@ -80,5 +80,16 @@ class DiscussionEnded(ChatEvent):
 
 
 @dataclass
+class AgentPermissionRequested(ChatEvent):
+    """Agent waiting for user tool approval."""
+    agent_name: str
+    round_number: int
+    request_id: str
+    tool_name: str
+    tool_input: dict
+    description: str = ""
+
+
+@dataclass
 class UserMessageReceived(ChatEvent):
     text: str

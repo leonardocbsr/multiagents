@@ -10,6 +10,7 @@ import SplitLayout from "./components/SplitLayout";
 import { fetchSessionStatus, type SessionStatus } from "./api";
 import { useToast } from "./components/Toast";
 import SettingsModal from "./components/SettingsModal";
+import PermissionBanner from "./components/PermissionBanner";
 import { Settings } from "lucide-react";
 
 function getHashSessionId(): string | null {
@@ -25,7 +26,7 @@ export default function App() {
   const handleSendFailure = useCallback((msgType: string) => {
     toastRef.current(`Failed to send ${msgType} — connection lost`, "error");
   }, []);
-  const { state, sendMessage, createSession, joinSession, stopAgent, stopRound, resume, disconnect, createCard, updateCard, startCard, delegateCard, markCardDone, deleteCard, sendDM, addAgent, removeAgent } = useWebSocket(handleSendFailure);
+  const { state, sendMessage, createSession, joinSession, stopAgent, stopRound, resume, disconnect, createCard, updateCard, startCard, delegateCard, markCardDone, deleteCard, sendDM, addAgent, removeAgent, respondToPermission } = useWebSocket(handleSendFailure);
   const [showPicker, setShowPicker] = useState(!getHashSessionId());
   const [showKanban, setShowKanban] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -202,6 +203,7 @@ export default function App() {
         )}
       </div>
       <AgentStatusBar state={state} onStopAgent={stopAgent} onRemoveAgent={removeAgent} onAddAgent={addAgent} />
+      <PermissionBanner permissions={state.pendingPermissions} onRespond={respondToPermission} />
       <div className="flex flex-1 overflow-hidden">
         {layoutMode === "unified" ? (
           <div className="flex-1 flex flex-col overflow-hidden">

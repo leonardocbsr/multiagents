@@ -6,6 +6,7 @@ from ..chat.events import (
     AgentCompleted,
     AgentInterrupted,
     AgentNotice,
+    AgentPermissionRequested,
     AgentPromptAssembled,
     AgentStderr,
     AgentStreamChunk,
@@ -55,5 +56,11 @@ def event_to_dict(event: ChatEvent) -> dict:
             return {"type": "agent_interrupted", "agent": agent, "round": rn, "partial_text": text, "created_at": _ts()}
         case AgentPromptAssembled(agent_name=agent, round_number=rn, sections=sections):
             return {"type": "agent_prompt", "agent": agent, "round": rn, "sections": sections}
+        case AgentPermissionRequested(agent_name=agent, round_number=rn, request_id=rid, tool_name=tool, tool_input=tinput, description=desc):
+            return {
+                "type": "permission_request", "agent": agent, "round": rn,
+                "request_id": rid, "tool_name": tool, "tool_input": tinput,
+                "description": desc, "created_at": _ts(),
+            }
         case _:
             return {"type": "unknown"}

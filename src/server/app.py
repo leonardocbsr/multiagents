@@ -27,7 +27,7 @@ _VALID_MSG_TYPES = frozenset({
     "create_session", "join_session", "message", "stop_agent", "stop_round",
     "resume", "cancel", "direct_message", "add_agent", "remove_agent",
     "ack", "metric", "card_create", "card_update", "card_start",
-    "card_delegate", "card_done", "card_delete",
+    "card_delegate", "card_done", "card_delete", "permission_response",
 })
 
 _REQUIRED_FIELDS: dict[str, list[str]] = {
@@ -43,6 +43,7 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
     "card_delegate": ["card_id"],
     "card_done": ["card_id"],
     "card_delete": ["card_id"],
+    "permission_response": ["request_id"],
 }
 
 # Rate limiting: max messages per window
@@ -519,7 +520,7 @@ def create_app(
                         "text": text, "round": current_round, "created_at": saved["created_at"],
                     })
                     if runner.is_running(session_id):
-                        # Active round — restart agent with the DM
+                        # Active round — queue a DM for the target agent
                         await runner.restart_agent(session_id, agent_name, text)
                     else:
                         # No active round — start a single-agent round with the DM
@@ -585,6 +586,13 @@ def create_app(
                     metric_sid = msg.get("session_id") or session_id
                     if isinstance(name, str) and isinstance(value, (int, float)):
                         runner.log_client_metric(name, metric_sid, float(value))
+
+                elif msg_type == "permission_response":
+                    if session_id:
+                        request_id = msg.get("request_id", "")
+                        approved = msg.get("approved", False)
+                        agent_name = msg.get("agent")  # target specific agent if provided
+                        runner.resolve_permission(session_id, request_id, approved, agent_name=agent_name)
 
                 elif msg_type == "card_create":
                     if not session_id:

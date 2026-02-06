@@ -4,11 +4,12 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator, Callable
 
-from ..agents.base import AgentNotice as BaseAgentNotice, AgentResponse, BaseAgent
+from ..agents.base import AgentNotice as BaseAgentNotice, AgentPermissionRequest, AgentResponse, BaseAgent
 from .events import (
     AgentCompleted,
     AgentInterrupted,
     AgentNotice,
+    AgentPermissionRequested,
     AgentPromptAssembled,
     AgentStderr,
     AgentStreamChunk,
@@ -92,10 +93,16 @@ class ChatRoom:
         """Resume after a paused round (triggered by stop)."""
         self._resume_event.set()
 
-    async def restart_agent(self, name: str, dm_text: str) -> None:
-        """Stop an agent and queue it for restart with a DM prompt.
+    def respond_to_permission(self, agent_name: str, response: object) -> None:
+        """Forward a permission response to the named agent."""
+        agent = next((a for a in self.agents if a.name == agent_name), None)
+        if agent:
+            asyncio.create_task(agent.respond_to_permission(response))
 
-        Multiple DMs within 500ms are coalesced into a single restart
+    async def restart_agent(self, name: str, dm_text: str) -> None:
+        """Queue a DM for an agent.
+
+        Multiple DMs within 500ms are coalesced into a single inbox event
         with the messages joined by newlines.
         """
         # Cancel any pending debounce timer for this agent
@@ -106,12 +113,7 @@ class ChatRoom:
         # Accumulate text
         self._dm_debounce_texts.setdefault(name, []).append(dm_text)
 
-        # Stop the agent immediately (idempotent if already stopped)
-        event = self._stop_events.get(name)
-        if event:
-            event.set()
-
-        # Schedule the actual restart after 500ms of silence
+        # Schedule the DM delivery after 500ms of silence
         loop = asyncio.get_running_loop()
 
         def _fire() -> None:
@@ -325,6 +327,17 @@ class ChatRoom:
                                     round_number=message_round,
                                     response=item,
                                     passed=is_pass,
+                                )
+                            )
+                        elif isinstance(item, AgentPermissionRequest):
+                            await event_queue.put(
+                                AgentPermissionRequested(
+                                    agent_name=item.agent,
+                                    round_number=message_round,
+                                    request_id=item.request_id,
+                                    tool_name=item.tool_name,
+                                    tool_input=item.tool_input,
+                                    description=item.description,
                                 )
                             )
                         elif isinstance(item, BaseAgentNotice):
@@ -767,6 +780,17 @@ class ChatRoom:
                                     round_number=round_number,
                                     response=item,
                                     passed=is_pass,
+                                )
+                            )
+                        elif isinstance(item, AgentPermissionRequest):
+                            await event_queue.put(
+                                AgentPermissionRequested(
+                                    agent_name=item.agent,
+                                    round_number=round_number,
+                                    request_id=item.request_id,
+                                    tool_name=item.tool_name,
+                                    tool_input=item.tool_input,
+                                    description=item.description,
                                 )
                             )
                         elif isinstance(item, BaseAgentNotice):

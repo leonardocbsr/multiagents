@@ -345,8 +345,27 @@ class SessionRunner:
         if room:
             room.resume()
 
+    def resolve_permission(self, session_id: str, request_id: str, approved: bool, *, agent_name: str | None = None) -> None:
+        """Route a permission response to the correct agent via the ChatRoom.
+
+        If *agent_name* is provided the response is sent only to that agent,
+        avoiding broadcast and eliminating request-id collision risk across agents.
+        Falls back to broadcast when agent_name is not supplied (backwards compat).
+        """
+        room = self._rooms.get(session_id)
+        if not room:
+            return
+        from ..agents.protocols.base import PermissionResponse
+        response = PermissionResponse(request_id=request_id, approved=approved)
+        if agent_name:
+            room.respond_to_permission(agent_name, response)
+        else:
+            # Fallback: broadcast to all agents (legacy clients)
+            for agent in room.agents:
+                room.respond_to_permission(agent.name, response)
+
     async def restart_agent(self, session_id: str, agent_name: str, dm_text: str) -> None:
-        """Restart an agent with a DM (cancel + continue)."""
+        """Queue a direct message for an agent in the active run."""
         room = self._rooms.get(session_id)
         if room:
             await room.restart_agent(agent_name, dm_text)
@@ -749,7 +768,7 @@ class SessionRunner:
         )
 
     def _apply_config_to_agents(self, agents: list, config: dict) -> None:
-        """Apply model and timeout settings from config to agents."""
+        """Apply model, timeout, and permission settings from config to agents."""
         for agent in agents:
             agent_type = agent.agent_type or agent.name
             if not agent.model:
@@ -761,6 +780,10 @@ class SessionRunner:
                 prompt_override = config.get(f"agents.{agent_type}.system_prompt")
                 if prompt_override:
                     agent.system_prompt_override = prompt_override
+            # Permission mode
+            perm_mode = config.get(f"agents.{agent_type}.permissions", "bypass")
+            if hasattr(agent, "permission_mode"):
+                agent.permission_mode = perm_mode
             parse_t = config.get("timeouts.parse")
             if isinstance(parse_t, (int, float)):
                 agent.parse_timeout = float(parse_t)

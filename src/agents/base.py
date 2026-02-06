@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .persistent import PersistentAgent
-    from .protocols.base import ProtocolAdapter
+    from .protocols.base import PermissionResponse, ProtocolAdapter
 
 log = logging.getLogger("multiagents")
 
@@ -57,6 +57,16 @@ class AgentNotice:
     """In-band notice from an agent (e.g. session reset). Yielded alongside str/AgentResponse."""
     agent: str
     message: str
+
+
+@dataclass
+class AgentPermissionRequest:
+    """Permission request with agent name attached."""
+    agent: str
+    request_id: str
+    tool_name: str
+    tool_input: dict
+    description: str = ""
 
 
 @dataclass
@@ -138,11 +148,17 @@ class BaseAgent(ABC):
             )
         return self._persistent
 
+    async def respond_to_permission(self, response: "PermissionResponse") -> None:
+        """Forward a permission decision to the protocol adapter."""
+        if self._persistent and self._persistent.protocol:
+            await self._persistent.protocol.respond_to_permission(response)
+
     async def _stream_persistent(
         self, prompt: str, timeout: float,
-    ) -> AsyncGenerator[str | AgentResponse | AgentNotice, None]:
+    ) -> AsyncGenerator[str | AgentResponse | AgentNotice | AgentPermissionRequest, None]:
         """Persistent-pipe streaming: delegates to PersistentAgent, translates events."""
         from .protocols.base import TextDelta, ThinkingDelta, ToolBadge, TurnComplete
+        from .protocols.base import PermissionRequest as ProtoPermReq
 
         pa = self._ensure_persistent()
         start = time.monotonic()
@@ -161,6 +177,14 @@ class BaseAgent(ABC):
                         yield f"<thinking>{event.text}</thinking>\n"
                     elif isinstance(event, ToolBadge):
                         yield _tool_badge(event.label, event.detail)
+                    elif isinstance(event, ProtoPermReq):
+                        yield AgentPermissionRequest(
+                            agent=self.name,
+                            request_id=event.request_id,
+                            tool_name=event.tool_name,
+                            tool_input=event.tool_input,
+                            description=event.description,
+                        )
                     elif isinstance(event, TurnComplete):
                         text = event.text or "".join(full_text_parts)
                         if not text and event.error:
@@ -209,7 +233,7 @@ class BaseAgent(ABC):
 
     async def stream(
         self, prompt: str, timeout: float = 1800.0,
-    ) -> AsyncGenerator[str | AgentResponse, None]:
+    ) -> AsyncGenerator[str | AgentResponse | AgentPermissionRequest, None]:
         """Stream stdout lines, then yield a final AgentResponse."""
         async for item in self._stream_persistent(prompt, timeout):
             yield item

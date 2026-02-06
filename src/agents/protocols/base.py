@@ -35,6 +35,22 @@ class TurnComplete(AgentEvent):
     error: str | None = None
 
 
+@dataclass
+class PermissionRequest(AgentEvent):
+    """Agent needs user approval for a tool call."""
+    request_id: str = ""
+    tool_name: str = ""
+    tool_input: dict = field(default_factory=dict)
+    description: str = ""
+
+
+@dataclass
+class PermissionResponse:
+    """User decision on a permission request."""
+    request_id: str = ""
+    approved: bool = False
+
+
 class ProtocolAdapter(ABC):
     """Abstract adapter between a common interface and an agent's wire protocol."""
 
@@ -56,6 +72,9 @@ class ProtocolAdapter(ABC):
 
     async def shutdown(self) -> None:
         """Graceful close. No-op by default."""
+
+    async def respond_to_permission(self, response: PermissionResponse) -> None:
+        """Send permission decision back to agent CLI. No-op by default."""
 
     def get_session_id(self) -> str | None:
         """Return session/thread ID for resume after crash."""

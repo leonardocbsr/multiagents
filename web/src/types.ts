@@ -20,6 +20,10 @@ export interface Settings {
   "memory.model": string;
   "server.warmup_ttl": number;
   "server.max_events": number;
+  "agents.claude.permissions": "bypass" | "auto" | "manual";
+  "agents.codex.permissions": "bypass" | "auto" | "manual";
+  "agents.kimi.permissions": "bypass" | "auto" | "manual";
+  "permissions.timeout": number;
 }
 
 export function normalizeAgents(agents: (string | AgentInfo)[]): AgentInfo[] {
@@ -87,6 +91,15 @@ export interface AppState {
   currentRound: number;
   cards: Card[];
   agentPrompts: Record<string, Record<number, Record<string, string>>>;
+  pendingPermissions: Array<{
+    request_id: string;
+    agent: string;
+    tool_name: string;
+    tool_input: Record<string, unknown>;
+    description: string;
+    round: number;
+    created_at: string;
+  }>;
 }
 
 export interface InFlightState {
@@ -122,6 +135,7 @@ export type ServerMessage = ServerEnvelope & (
   | { type: "agent_interrupted"; agent: string; round: number; partial_text: string; created_at?: string }
   | { type: "dm_sent"; agent: string; text: string; round: number; created_at?: string }
   | { type: "agent_prompt"; agent: string; round: number; sections: Record<string, string> }
+  | { type: "permission_request"; agent: string; round: number; request_id: string; tool_name: string; tool_input: Record<string, unknown>; description: string; created_at?: string }
 );
 
 export type ClientMessage =
@@ -142,7 +156,8 @@ export type ClientMessage =
   | { type: "card_delegate"; card_id: string }
   | { type: "card_done"; card_id: string }
   | { type: "card_delete"; card_id: string }
-  | { type: "direct_message"; agent: string; text: string };
+  | { type: "direct_message"; agent: string; text: string }
+  | { type: "permission_response"; request_id: string; approved: boolean; agent?: string };
 
 // === Agent Coordination Patterns ===
 

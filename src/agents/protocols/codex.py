@@ -49,8 +49,10 @@ class CodexProtocol(ProtocolAdapter):
     _thread_id: str | None = None
     _turn_id: str | None = None
 
-    def __init__(self) -> None:
+    def __init__(self, approval_policy: str = "never", sandbox: str = "danger-full-access") -> None:
         self._id_counter = 0
+        self._approval_policy = approval_policy
+        self._sandbox = sandbox
 
     def _next_id(self) -> int:
         self._id_counter += 1
@@ -160,8 +162,8 @@ class CodexProtocol(ProtocolAdapter):
 
         req_id = self._next_id()
         await self._send_rpc(_rpc_request(req_id, "thread/start", {
-            "approvalPolicy": "never",
-            "sandbox": "danger-full-access",
+            "approvalPolicy": self._approval_policy,
+            "sandbox": self._sandbox,
         }))
 
         thread, result = await self._wait_for_thread_id(req_id)
@@ -177,8 +179,8 @@ class CodexProtocol(ProtocolAdapter):
         resume_id = self._next_id()
         await self._send_rpc(_rpc_request(resume_id, "thread/resume", {
             "threadId": thread_id,
-            "approvalPolicy": "never",
-            "sandbox": "danger-full-access",
+            "approvalPolicy": self._approval_policy,
+            "sandbox": self._sandbox,
         }))
         resumed_thread, result = await self._wait_for_thread_id(resume_id)
         if resumed_thread:

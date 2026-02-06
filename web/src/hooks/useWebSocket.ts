@@ -21,6 +21,7 @@ const INITIAL_STATE: AppState = {
   currentRound: 0,
   cards: [],
   agentPrompts: {},
+  pendingPermissions: [],
 };
 
 const BASE_RECONNECT_DELAY_MS = 500;
@@ -41,7 +42,8 @@ type Action =
   | { type: "reconnect_scheduled"; attempt: number; delayMs: number }
   | { type: "reconnect_cleared" }
   | { type: "reconnect_exhausted" }
-  | { type: "reconnect_tick"; remainingMs: number };
+  | { type: "reconnect_tick"; remainingMs: number }
+  | { type: "remove_permission"; requestId: string };
 
 function reducer(state: AppState, action: Action): AppState {
   if (action.type === "reset") return { ...INITIAL_STATE };
@@ -67,6 +69,9 @@ function reducer(state: AppState, action: Action): AppState {
   if (action.type === "reconnect_tick") {
     return { ...state, reconnectInMs: action.remainingMs };
   }
+  if (action.type === "remove_permission") {
+    return { ...state, pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== action.requestId) };
+  }
 
   const msg = action.msg;
 
@@ -86,6 +91,7 @@ function reducer(state: AppState, action: Action): AppState {
         pendingAgentStderr: {},
         cards: [],
         agentPrompts: {},
+        pendingPermissions: [],
         reconnecting: false,
         reconnectAttempt: 0,
         reconnectInMs: null,
@@ -210,7 +216,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, isPaused: true };
 
     case "discussion_ended":
-      return { ...state, isRunning: false, isPaused: false, currentRound: 0, agentStreams: {}, agentStreamCounts: {}, agentStatuses: {} };
+      return { ...state, isRunning: false, isPaused: false, currentRound: 0, agentStreams: {}, agentStreamCounts: {}, agentStatuses: {}, pendingPermissions: [] };
 
     case "error":
       return state;
@@ -276,6 +282,20 @@ function reducer(state: AppState, action: Action): AppState {
         },
       };
     }
+
+    case "permission_request":
+      return {
+        ...state,
+        pendingPermissions: [...state.pendingPermissions, {
+          request_id: msg.request_id,
+          agent: msg.agent,
+          tool_name: msg.tool_name,
+          tool_input: msg.tool_input,
+          description: msg.description,
+          round: msg.round,
+          created_at: msg.created_at ?? new Date().toISOString(),
+        }],
+      };
 
     case "agent_added": {
       const newAgent: AgentInfo = { name: msg.name, type: msg.agent_type, role: msg.role };
@@ -504,5 +524,10 @@ export function useWebSocket(onSendFailure?: (msgType: string) => void) {
     send({ type: "remove_agent", name });
   }, [send]);
 
-  return { state, sendMessage, createSession, joinSession, stopAgent, stopRound, resume, disconnect, createCard, updateCard, startCard, delegateCard, markCardDone, deleteCard, sendDM, addAgent, removeAgent };
+  const respondToPermission = useCallback((requestId: string, approved: boolean, agent?: string) => {
+    send({ type: "permission_response", request_id: requestId, approved, agent });
+    dispatch({ type: "remove_permission", requestId });
+  }, [send]);
+
+  return { state, sendMessage, createSession, joinSession, stopAgent, stopRound, resume, disconnect, createCard, updateCard, startCard, delegateCard, markCardDone, deleteCard, sendDM, addAgent, removeAgent, respondToPermission };
 }

@@ -11,6 +11,7 @@ log = logging.getLogger("multiagents")
 class CodexAgent(BaseAgent):
     name = "codex"
     agent_type = "codex"
+    permission_mode: str = "bypass"
     _HISTORY_CONFIG = 'history={persistence="save-all", truncation="auto"}'
 
     def _dev_instructions_config(self) -> str:
@@ -31,5 +32,10 @@ class CodexAgent(BaseAgent):
         return self._build_persistent_args()
 
     def _get_protocol(self) -> CodexProtocol:
-        return CodexProtocol()
-
+        policy_map = {
+            "bypass": ("never", "danger-full-access"),
+            "auto": ("auto-edit", "danger-full-access"),
+            "manual": ("suggest", "danger-full-access"),
+        }
+        policy, sandbox = policy_map.get(self.permission_mode, ("never", "danger-full-access"))
+        return CodexProtocol(approval_policy=policy, sandbox=sandbox)

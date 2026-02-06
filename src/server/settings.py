@@ -23,6 +23,12 @@ DEFAULTS: dict[str, Any] = {
     "memory.model": "haiku",
     "server.warmup_ttl": 300,
     "server.max_events": 2000,
+    # Permission mode per agent: "bypass" | "auto" | "manual"
+    "agents.claude.permissions": "bypass",
+    "agents.codex.permissions": "bypass",
+    "agents.kimi.permissions": "bypass",
+    # Timeout for pending permission requests (seconds, 0 = no timeout)
+    "permissions.timeout": 120,
 }
 
 _SCHEMA = """

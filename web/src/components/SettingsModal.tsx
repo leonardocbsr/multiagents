@@ -7,7 +7,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "agents" | "timeouts" | "advanced";
+type Tab = "agents" | "permissions" | "timeouts" | "advanced";
 
 const AGENT_TYPES = ["claude", "codex", "kimi"] as const;
 
@@ -68,6 +68,7 @@ export default function SettingsModal({ open, onClose }: Props) {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "agents", label: "Agents" },
+    { id: "permissions", label: "Permissions" },
     { id: "timeouts", label: "Timeouts" },
     { id: "advanced", label: "Advanced" },
   ];
@@ -151,6 +152,57 @@ export default function SettingsModal({ open, onClose }: Props) {
                   </div>
                 );
               })}
+            </>
+          )}
+
+          {!loading && tab === "permissions" && (
+            <>
+              {AGENT_TYPES.map(type => {
+                const key = `agents.${type}.permissions`;
+                const value = (getValue(key) as string) || "bypass";
+                return (
+                  <div key={type} className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <label className="text-xs text-zinc-300 capitalize">{type}</label>
+                      <p className="text-[10px] text-zinc-600">
+                        {type === "codex" ? "Policy-based only (no per-tool blocking)" : "Permission mode for tool use"}
+                      </p>
+                    </div>
+                    <select
+                      value={value}
+                      onChange={(e) => setField(key, e.target.value)}
+                      className="w-32 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
+                    >
+                      <option value="bypass">Bypass All</option>
+                      <option value="auto">Auto (Smart)</option>
+                      <option value="manual">Ask User</option>
+                    </select>
+                  </div>
+                );
+              })}
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <label className="text-xs text-zinc-300">Permission Timeout</label>
+                  <p className="text-[10px] text-zinc-600">Seconds before pending requests auto-approve (0 = no timeout)</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={(() => {
+                      const raw = getValue("permissions.timeout");
+                      return typeof raw === "string" || typeof raw === "number" ? raw : raw ?? "";
+                    })() as string | number}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") { setField("permissions.timeout", ""); return; }
+                      const num = Number(raw);
+                      if (!Number.isNaN(num)) setField("permissions.timeout", num);
+                    }}
+                    className="w-20 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 text-right focus:outline-none focus:border-zinc-500"
+                  />
+                  <span className="text-[10px] text-zinc-500 w-3">s</span>
+                </div>
+              </div>
             </>
           )}
 

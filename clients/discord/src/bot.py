@@ -33,6 +33,10 @@ class MultiAgentsBot(discord.Client):
         self._listeners: dict[int, asyncio.Task] = {}
         # thread_id → asyncio.Task (inactivity timer)
         self._timers: dict[int, asyncio.Task] = {}
+        # thread_id → set of allowed user IDs for that thread
+        self._thread_participants: dict[int, set[int]] = {}
+        # thread_ids currently being intentionally stopped
+        self._stopping: set[int] = set()
 
     def should_handle(self, message: discord.Message) -> bool:
         """Check if this message should be processed."""
@@ -77,6 +81,11 @@ class MultiAgentsBot(discord.Client):
 
         # Message in an active thread → forward to session
         if self.is_thread_message(message) and message.channel.id in self._bridges:
+            # Enforce per-thread participant check
+            participants = self._thread_participants.get(message.channel.id)
+            if participants is not None and message.author.id not in participants:
+                log.info("User %s not a participant of thread %s, ignoring", message.author.id, message.channel.id)
+                return
             bridge = self._bridges[message.channel.id]
             await bridge.send_message(message.content)
             self._reset_inactivity_timer(message.channel)
@@ -94,9 +103,9 @@ class MultiAgentsBot(discord.Client):
                 prompt = "Start a discussion"
 
             thread = await message.create_thread(name=self.thread_name(prompt))
-            await self._start_session(thread, prompt)
+            await self._start_session(thread, prompt, creator_id=message.author.id)
 
-    async def _start_session(self, thread: discord.Thread, prompt: str):
+    async def _start_session(self, thread: discord.Thread, prompt: str, creator_id: int | None = None):
         """Create a new session and start listening for events."""
         bridge = Bridge(self.config.server_url)
 
@@ -104,10 +113,17 @@ class MultiAgentsBot(discord.Client):
             session_id = await bridge.connect_and_create(self.config.default_agents)
         except Exception:
             log.exception("Failed to connect to multiagents server")
+            try:
+                await bridge.close()
+            except Exception:
+                pass
             await thread.send("Could not connect to multiagents server.")
             return
 
         self._bridges[thread.id] = bridge
+        # Track the thread creator as the initial participant
+        if creator_id is not None:
+            self._thread_participants[thread.id] = {creator_id}
 
         try:
             agents_str = ", ".join(self.config.default_agents)
@@ -130,6 +146,7 @@ class MultiAgentsBot(discord.Client):
     async def _listen_loop(self, thread: discord.Thread, bridge: Bridge):
         """Listen for server events with reconnection on disconnect."""
         attempt = 0
+        thread_id = thread.id
 
         async def on_event(event: dict):
             messages = format_event(event)
@@ -146,7 +163,8 @@ class MultiAgentsBot(discord.Client):
                     attempt += 1
                     if attempt > MAX_RECONNECT_ATTEMPTS:
                         log.warning("Max reconnect attempts for thread %s", thread.id)
-                        await thread.send("Lost connection to server. Session ended.")
+                        if thread_id not in self._stopping:
+                            await thread.send("Lost connection to server. Session ended.")
                         break
 
                     delay = min(MAX_RECONNECT_DELAY, BASE_RECONNECT_DELAY * (2 ** (attempt - 1)))
@@ -154,22 +172,25 @@ class MultiAgentsBot(discord.Client):
                         "Reconnecting thread %s (attempt %d/%d, delay %.1fs)",
                         thread.id, attempt, MAX_RECONNECT_ATTEMPTS, delay,
                     )
-                    await thread.send(
-                        f"Connection lost. Reconnecting (attempt {attempt}/{MAX_RECONNECT_ATTEMPTS})..."
-                    )
+                    if thread_id not in self._stopping:
+                        await thread.send(
+                            f"Connection lost. Reconnecting (attempt {attempt}/{MAX_RECONNECT_ATTEMPTS})..."
+                        )
                     await asyncio.sleep(delay)
 
                     try:
                         await bridge.reconnect()
                         attempt = 0
-                        await thread.send("Reconnected.")
+                        if thread_id not in self._stopping:
+                            await thread.send("Reconnected.")
                     except asyncio.CancelledError:
                         raise
                     except Exception:
                         log.exception("Reconnect failed for thread %s", thread.id)
                 except Exception:
                     log.exception("Unexpected error in listener for thread %s", thread.id)
-                    await thread.send("An error occurred. Session ended.")
+                    if thread_id not in self._stopping:
+                        await thread.send("An error occurred. Session ended.")
                     break
         except asyncio.CancelledError:
             pass
@@ -179,12 +200,30 @@ class MultiAgentsBot(discord.Client):
     async def _stop_session(self, channel: discord.Thread | Any):
         """Stop the session for a thread."""
         thread_id = channel.id
+        self._stopping.add(thread_id)
+        listener = self._listeners.get(thread_id)
+        if listener and not listener.done():
+            listener.cancel()
+            try:
+                await listener
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.exception("Listener shutdown failed for thread %s", thread_id)
+
         bridge = self._bridges.get(thread_id)
         if bridge:
-            await bridge.cancel()
-            await bridge.close()
+            try:
+                await bridge.cancel()
+            except Exception:
+                log.debug("bridge.cancel() failed for thread %s", thread_id)
+            try:
+                await bridge.close()
+            except Exception:
+                log.debug("bridge.close() failed for thread %s", thread_id)
         await channel.send("Session stopped.")
         self._cleanup_thread(thread_id)
+        self._stopping.discard(thread_id)
         if hasattr(channel, "edit"):
             try:
                 await channel.edit(archived=True)
@@ -194,6 +233,7 @@ class MultiAgentsBot(discord.Client):
     def _cleanup_thread(self, thread_id: int):
         """Clean up all state for a thread."""
         self._bridges.pop(thread_id, None)
+        self._thread_participants.pop(thread_id, None)
         listener = self._listeners.pop(thread_id, None)
         if listener and not listener.done():
             listener.cancel()

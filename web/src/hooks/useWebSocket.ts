@@ -111,6 +111,7 @@ function reducer(state: AppState, action: Action): AppState {
           agentStreamCounts: {},
           agentStatuses: msg.in_flight.agent_statuses,
           pendingAgentStderr: {},
+          pendingPermissions: [],
           cards: msg.cards ?? [],
           agentPrompts: {},
           reconnecting: false,
@@ -130,6 +131,7 @@ function reducer(state: AppState, action: Action): AppState {
         agentStreamCounts: {},
         agentStatuses: {},
         pendingAgentStderr: {},
+        pendingPermissions: [],
         cards: msg.cards ?? [],
         agentPrompts: {},
         reconnecting: false,
@@ -284,6 +286,9 @@ function reducer(state: AppState, action: Action): AppState {
     }
 
     case "permission_request":
+      if (state.pendingPermissions.some((p) => p.request_id === msg.request_id)) {
+        return state;
+      }
       return {
         ...state,
         pendingPermissions: [...state.pendingPermissions, {
@@ -525,8 +530,10 @@ export function useWebSocket(onSendFailure?: (msgType: string) => void) {
   }, [send]);
 
   const respondToPermission = useCallback((requestId: string, approved: boolean, agent?: string) => {
-    send({ type: "permission_response", request_id: requestId, approved, agent });
-    dispatch({ type: "remove_permission", requestId });
+    const sent = send({ type: "permission_response", request_id: requestId, approved, agent });
+    if (sent) {
+      dispatch({ type: "remove_permission", requestId });
+    }
   }, [send]);
 
   return { state, sendMessage, createSession, joinSession, stopAgent, stopRound, resume, disconnect, createCard, updateCard, startCard, delegateCard, markCardDone, deleteCard, sendDM, addAgent, removeAgent, respondToPermission };

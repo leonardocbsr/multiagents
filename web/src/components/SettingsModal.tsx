@@ -183,7 +183,7 @@ export default function SettingsModal({ open, onClose }: Props) {
               <div className="flex items-center gap-3">
                 <div className="flex-1">
                   <label className="text-xs text-zinc-300">Permission Timeout</label>
-                  <p className="text-[10px] text-zinc-600">Seconds before pending requests auto-approve (0 = no timeout)</p>
+                  <p className="text-[10px] text-zinc-600">Seconds before pending requests auto-deny (0 = no timeout)</p>
                 </div>
                 <div className="flex items-center gap-1">
                   <input

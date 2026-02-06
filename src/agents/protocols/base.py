@@ -28,6 +28,21 @@ class ToolBadge(AgentEvent):
 
 
 @dataclass
+class ToolOutput(AgentEvent):
+    """Streaming output from a tool execution (e.g. bash stdout)."""
+    tool_name: str = ""
+    text: str = ""
+
+
+@dataclass
+class ToolResult(AgentEvent):
+    """Tool execution completed."""
+    tool_name: str = ""
+    success: bool = True
+    output: str = ""  # truncated summary
+
+
+@dataclass
 class TurnComplete(AgentEvent):
     text: str = ""
     session_id: str | None = None

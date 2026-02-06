@@ -228,9 +228,25 @@ class CodexProtocol(ProtocolAdapter):
                 continue
 
             if method == "turn/completed":
-                log.info("[codex-proto] turn/completed thread=%s", self._thread_id)
+                turn = params.get("turn", {}) if isinstance(params, dict) else {}
+                status = turn.get("status")
+                turn_error = turn.get("error") if isinstance(turn, dict) else None
+                error_message = ""
+                if isinstance(turn_error, dict):
+                    error_message = str(turn_error.get("message") or "")
+                success = status in (None, "completed")
+
+                log.info(
+                    "[codex-proto] turn/completed thread=%s status=%s",
+                    self._thread_id,
+                    status or "<unknown>",
+                )
                 self._turn_id = None
-                yield TurnComplete(session_id=self._thread_id)
+                yield TurnComplete(
+                    session_id=self._thread_id,
+                    success=success,
+                    error=error_message or None,
+                )
                 return
 
             # ── Streaming deltas ────────────────────────────────────

@@ -31,6 +31,8 @@ class ToolBadge(AgentEvent):
 class TurnComplete(AgentEvent):
     text: str = ""
     session_id: str | None = None
+    success: bool = True
+    error: str | None = None
 
 
 class ProtocolAdapter(ABC):

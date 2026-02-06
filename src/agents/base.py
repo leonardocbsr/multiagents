@@ -163,7 +163,7 @@ class BaseAgent(ABC):
                         yield _tool_badge(event.label, event.detail)
                     elif isinstance(event, TurnComplete):
                         text = event.text or "".join(full_text_parts)
-                        self.session_id = event.session_id or pa._session_id
+                        self.session_id = event.session_id or pa._session_id or self.session_id
                         yield AgentResponse(
                             agent=self.name,
                             response=text,

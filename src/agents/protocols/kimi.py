@@ -1,8 +1,15 @@
 """Kimi JSON-RPC wire protocol adapter.
 
-Wire format:
-  Send: JSON-RPC requests (prompt, cancel)
-  Recv: JSON-RPC notifications (ContentPart, TurnEnd, etc.)
+Wire format (per https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html):
+  Send: JSON-RPC 2.0 requests (initialize, prompt, cancel)
+  Recv: JSON-RPC 2.0 notifications wrapped as event/request:
+    Events:  TurnBegin, TurnEnd, StepBegin, StepInterrupted,
+             CompactionBegin, CompactionEnd, StatusUpdate,
+             ContentPart, ToolCall, ToolCallPart, ToolResult,
+             ApprovalResponse, SubagentEvent
+    Requests: ApprovalRequest, ToolCallRequest (must respond)
+    ContentPart types: text, think/thinking, tool_call/toolcall,
+                       image_url, audio_url, video_url
 """
 from __future__ import annotations
 
@@ -136,7 +143,7 @@ class KimiProtocol(ProtocolAdapter):
             # Wire protocol wrapper: event notifications carry typed payloads.
             if method_norm == "event" and isinstance(params, dict):
                 method_norm = str(params.get("type", "")).lower()
-                params = params.get("payload", {})
+                params = params.get("payload", {}) if isinstance(params.get("payload"), dict) else params.get("payload", {})
                 _bump_method(f"event:{method_norm}")
 
             # Wire protocol request: must respond or the turn can block forever.
@@ -149,6 +156,7 @@ class KimiProtocol(ProtocolAdapter):
                         response_id = payload.get("id") or payload.get("request_id") or ""
                         await self._send_response(req_id, {"request_id": response_id, "response": "approve"})
                         log.info("[kimi-proto] auto-approved request id=%s", response_id)
+                        yield ToolBadge(label="Approved", detail="")
                     elif req_type == "ToolCallRequest":
                         tool_call_id = payload.get("id") or payload.get("tool_call_id") or ""
                         await self._send_response(
@@ -167,6 +175,84 @@ class KimiProtocol(ProtocolAdapter):
                     else:
                         await self._send_response(req_id, {"ok": True})
                         log.info("[kimi-proto] acknowledged request type=%s", req_type)
+                continue
+
+            # Turn begin — agent started processing
+            if method_norm in {"turnbegin", "turn_begin", "turn/begin"}:
+                log.debug("[kimi-proto] turn begin")
+                continue
+
+            # Step begin — new agent step
+            if method_norm in {"stepbegin", "step_begin", "step/begin"}:
+                step_n = params.get("n", "") if isinstance(params, dict) else ""
+                log.debug("[kimi-proto] step begin n=%s", step_n)
+                if step_n:
+                    yield ToolBadge(label="Step", detail=str(step_n))
+                continue
+
+            # Step interrupted
+            if method_norm in {"stepinterrupted", "step_interrupted", "step/interrupted"}:
+                log.info("[kimi-proto] step interrupted")
+                continue
+
+            # Context compaction
+            if method_norm in {"compactionbegin", "compaction_begin", "compaction/begin"}:
+                log.info("[kimi-proto] context compaction started")
+                yield ToolBadge(label="Compacting", detail="")
+                continue
+
+            if method_norm in {"compactionend", "compaction_end", "compaction/end"}:
+                log.info("[kimi-proto] context compaction ended")
+                continue
+
+            # Status update (context usage, token usage)
+            if method_norm in {"statusupdate", "status_update", "status/update"}:
+                if isinstance(params, dict):
+                    ctx_usage = params.get("context_usage")
+                    if ctx_usage is not None:
+                        log.debug("[kimi-proto] status update context_usage=%.2f", float(ctx_usage))
+                continue
+
+            # Standalone tool call event
+            if method_norm in {"toolcall", "tool_call", "tool/call"}:
+                if isinstance(params, dict):
+                    fn = params.get("function", {})
+                    name = fn.get("name", "") if isinstance(fn, dict) else ""
+                    try:
+                        args = json.loads(fn.get("arguments", "{}")) if isinstance(fn, dict) else {}
+                    except (json.JSONDecodeError, ValueError):
+                        args = {}
+                    tool_events += 1
+                    yield ToolBadge(label=name, detail=_extract_tool_detail(args))
+                continue
+
+            # Tool call part — streaming tool arguments
+            if method_norm in {"toolcallpart", "tool_call_part", "tool/call/part"}:
+                # Streaming arguments, no visible output needed
+                continue
+
+            # Tool result event
+            if method_norm in {"toolresult", "tool_result", "tool/result"}:
+                if isinstance(params, dict):
+                    ret = params.get("return_value", {})
+                    is_err = ret.get("is_error", False) if isinstance(ret, dict) else False
+                    tool_id = params.get("tool_call_id", "")
+                    if is_err:
+                        log.debug("[kimi-proto] tool result error tool_call_id=%s", tool_id)
+                continue
+
+            # Approval response (agent confirming an approval)
+            if method_norm in {"approvalresponse", "approval_response", "approval/response"}:
+                if isinstance(params, dict):
+                    log.debug("[kimi-proto] approval response=%s", params.get("response", ""))
+                continue
+
+            # Subagent event
+            if method_norm in {"subagentevent", "subagent_event", "subagent/event"}:
+                if isinstance(params, dict):
+                    sub_event = params.get("event", {})
+                    sub_type = sub_event.get("type", "") if isinstance(sub_event, dict) else ""
+                    yield ToolBadge(label="Subagent", detail=sub_type[:40])
                 continue
 
             # Content part notification
@@ -193,9 +279,13 @@ class KimiProtocol(ProtocolAdapter):
                         args = {}
                     tool_events += 1
                     yield ToolBadge(label=name, detail=_extract_tool_detail(args))
+                elif part_type in {"image_url", "audio_url", "video_url"}:
+                    log.debug("[kimi-proto] media content part type=%s", part_type)
+                elif part_type:
+                    log.debug("[kimi-proto] unhandled content part type=%s keys=%s", part_type, sorted(part.keys()))
                 continue
 
-            # Turn end notification
+            # Turn end notification (TurnEnd has no fields per wire spec 1.2)
             if method_norm in {"turnend", "turn/end", "turn_completed", "turncompleted"}:
                 result = params.get("result", "") if isinstance(params, dict) else ""
                 text = ""
@@ -203,9 +293,12 @@ class KimiProtocol(ProtocolAdapter):
                     text = str(result.get("text", "") or result.get("content", ""))
                 elif isinstance(result, str):
                     text = result
-                self._session_id = (
-                    params.get("session_id") if isinstance(params, dict) else None
-                ) or (params.get("sessionId") if isinstance(params, dict) else None)
+                # Only update session_id if present; don't overwrite with None
+                sid = None
+                if isinstance(params, dict):
+                    sid = params.get("session_id") or params.get("sessionId")
+                if sid:
+                    self._session_id = sid
                 log.info(
                     "[kimi-proto] turn complete via method=%s lines=%d text_events=%d think_events=%d tool_events=%d session_id=%s",
                     method_norm,
@@ -301,14 +394,13 @@ class KimiProtocol(ProtocolAdapter):
                 yield TurnComplete(text=text, session_id=self._session_id)
                 return
 
-            if line_count <= 5 or (line_count % 50 == 0):
+            # Log all unrecognized events for debugging silent gaps
+            if method_norm or event_type:
                 log.debug(
-                    "[kimi-proto] unhandled line=%d keys=%s method=%s type=%s sample=%s",
-                    line_count,
-                    sorted(obj.keys()) if isinstance(obj, dict) else [],
+                    "[kimi-proto] unhandled method=%s type=%s keys=%s",
                     method_norm,
                     event_type,
-                    line[:200].rstrip(),
+                    sorted(obj.keys()) if isinstance(obj, dict) else [],
                 )
 
         if rpc_error is not None:

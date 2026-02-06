@@ -217,7 +217,8 @@ class CodexProtocol(ProtocolAdapter):
             method = obj.get("method", "")
             params = obj.get("params", {})
 
-            # Track turn id from turn/started for use in turn/interrupt
+            # ── Turn lifecycle ──────────────────────────────────────
+
             if method == "turn/started":
                 turn = params.get("turn", {})
                 tid = turn.get("id")
@@ -226,27 +227,129 @@ class CodexProtocol(ProtocolAdapter):
                     log.debug("[codex-proto] turn/started turnId=%s", tid)
                 continue
 
-            # Text delta from agent message
+            if method == "turn/completed":
+                log.info("[codex-proto] turn/completed thread=%s", self._thread_id)
+                self._turn_id = None
+                yield TurnComplete(session_id=self._thread_id)
+                return
+
+            # ── Streaming deltas ────────────────────────────────────
+
+            # Agent text output (primary response text)
             if method == "item/agentMessage/delta":
                 delta = params.get("delta", "")
                 if delta:
                     yield TextDelta(text=delta)
                 continue
 
-            # Item completed
+            # Reasoning text delta — streams during thinking (can last minutes)
+            if method == "item/reasoning/textDelta":
+                delta = params.get("delta", "")
+                if delta:
+                    yield ThinkingDelta(text=delta)
+                continue
+
+            # Reasoning summary delta — streams the visible summary
+            if method == "item/reasoning/summaryTextDelta":
+                delta = params.get("delta", "")
+                if delta:
+                    yield ThinkingDelta(text=delta)
+                continue
+
+            # Reasoning summary part added — new summary section started
+            if method == "item/reasoning/summaryPartAdded":
+                continue
+
+            # Plan delta — streams plan text (experimental)
+            if method == "item/plan/delta":
+                delta = params.get("delta", "")
+                if delta:
+                    yield ThinkingDelta(text=delta)
+                continue
+
+            # Command execution output delta — command stdout/stderr
+            if method == "item/commandExecution/outputDelta":
+                # Don't stream command output as text (can be very verbose),
+                # but the item/started badge already signals activity.
+                continue
+
+            # Terminal interaction during command execution
+            if method == "item/commandExecution/terminalInteraction":
+                continue
+
+            # File change output delta
+            if method == "item/fileChange/outputDelta":
+                continue
+
+            # MCP tool call progress
+            if method == "item/mcpToolCall/progress":
+                message = params.get("message", "")
+                if message:
+                    yield ToolBadge(label="MCP", detail=message[:80])
+                continue
+
+            # ── Item started ────────────────────────────────────────
+
+            if method == "item/started":
+                item = params.get("item", {})
+                itype = item.get("type", "")
+                if itype == "commandExecution":
+                    cmd = item.get("command", "")
+                    if " -lc " in cmd:
+                        cmd = cmd.split(" -lc ", 1)[1].strip("'\"")
+                    short = cmd[:80] + "..." if len(cmd) > 80 else cmd
+                    yield ToolBadge(label="Run", detail=short)
+                elif itype == "mcpToolCall":
+                    tool = item.get("tool", "")
+                    server = item.get("server", "")
+                    label = f"{server}/{tool}" if server else tool
+                    yield ToolBadge(label="MCP", detail=label[:80])
+                elif itype == "webSearch":
+                    query = item.get("query", "")
+                    yield ToolBadge(label="Search", detail=query[:80])
+                elif itype == "reasoning":
+                    yield ToolBadge(label="Thinking", detail="")
+                elif itype == "fileChange":
+                    changes = item.get("changes", [])
+                    if changes:
+                        for ch in changes:
+                            label = _extract_file_change_label(ch.get("kind", {}))
+                            yield ToolBadge(label=label, detail=_short_path(ch.get("path", "")))
+                    else:
+                        yield ToolBadge(label="Write", detail="")
+                elif itype == "plan":
+                    yield ToolBadge(label="Planning", detail="")
+                elif itype == "collabAgentToolCall":
+                    tool = item.get("tool", "")
+                    yield ToolBadge(label="Agent", detail=tool)
+                elif itype == "contextCompaction":
+                    yield ToolBadge(label="Compacting", detail="")
+                elif itype == "imageView":
+                    path = item.get("path", "")
+                    yield ToolBadge(label="Image", detail=_short_path(path) if path else "")
+                elif itype not in ("agentMessage", "userMessage"):
+                    log.debug("[codex-proto] unhandled item/started type=%s", itype)
+                continue
+
+            # ── Item completed ──────────────────────────────────────
+
             if method == "item/completed":
                 item = params.get("item", {})
                 item_type = item.get("type", "")
 
                 if item_type == "agentMessage":
-                    # Skip: full text already streamed via item/agentMessage/delta events.
+                    # Full text already streamed via item/agentMessage/delta.
                     pass
                 elif item_type == "reasoning":
-                    # Reasoning has summary: string[] and content: string[]
+                    # Summary already streamed via deltas; emit final if present
+                    # and not already streamed.
                     parts = item.get("summary", []) or item.get("content", [])
                     text = "\n".join(parts) if parts else ""
                     if text:
                         yield ThinkingDelta(text=text)
+                elif item_type == "plan":
+                    # Plan text already streamed via item/plan/delta.
+                    pass
                 elif item_type == "commandExecution":
                     cmd = item.get("command", "")
                     if " -lc " in cmd:
@@ -265,44 +368,40 @@ class CodexProtocol(ProtocolAdapter):
                 elif item_type == "webSearch":
                     query = item.get("query", "")
                     yield ToolBadge(label="Search", detail=query[:80])
-                continue
-
-            # Item started — command execution / MCP badge
-            if method == "item/started":
-                item = params.get("item", {})
-                itype = item.get("type", "")
-                if itype == "commandExecution":
-                    cmd = item.get("command", "")
-                    if " -lc " in cmd:
-                        cmd = cmd.split(" -lc ", 1)[1].strip("'\"")
-                    short = cmd[:80] + "..." if len(cmd) > 80 else cmd
-                    yield ToolBadge(label="Run", detail=short)
-                elif itype == "mcpToolCall":
+                elif item_type == "collabAgentToolCall":
                     tool = item.get("tool", "")
-                    server = item.get("server", "")
-                    label = f"{server}/{tool}" if server else tool
-                    yield ToolBadge(label="MCP", detail=label[:80])
-                elif itype == "webSearch":
-                    query = item.get("query", "")
-                    yield ToolBadge(label="Search", detail=query[:80])
+                    yield ToolBadge(label="Agent", detail=tool)
                 continue
 
-            # Turn completed — end of this turn
-            if method == "turn/completed":
-                log.info("[codex-proto] turn/completed thread=%s", self._thread_id)
-                self._turn_id = None
-                yield TurnComplete(session_id=self._thread_id)
-                return
+            # ── JSON-RPC responses and errors ───────────────────────
 
-            # Response with id (JSON-RPC response) — skip
             if "id" in obj and "result" in obj:
                 continue
 
-            # Error notification
             if method == "error":
                 msg = params.get("error", {}).get("message", str(params))
                 log.warning("[codex-proto] error notification: %s", msg)
                 continue
+
+            # ── Informational notifications (no UI) ─────────────────
+
+            if method in (
+                "thread/started", "thread/name/updated",
+                "thread/tokenUsage/updated", "thread/compacted",
+                "turn/diff/updated", "turn/plan/updated",
+                "account/updated", "account/rateLimits/updated",
+                "account/login/completed", "configWarning",
+                "deprecationNotice", "sessionConfigured",
+                "mcpServer/oauthLogin/completed",
+                "authStatusChange", "loginChatGptComplete",
+                "rawResponseItem/completed",
+                "windows/worldWritableWarning",
+            ):
+                continue
+
+            # Log anything we haven't explicitly handled
+            if method:
+                log.debug("[codex-proto] unhandled method=%s keys=%s", method, ",".join(sorted(obj.keys())))
 
         raise RuntimeError("codex process ended before turn/completed")
 

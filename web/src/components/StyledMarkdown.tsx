@@ -48,7 +48,32 @@ function parseSegments(input: string): Segment[] {
     segments.push({ kind: "text", content: input.slice(lastIndex) });
   }
 
-  return segments;
+  // Merge consecutive same-tag segments (e.g. multiple <thinking> deltas from streaming)
+  // so they render as one block instead of many separate badges.
+  const merged: Segment[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    // Skip whitespace-only text between two tag segments with the same tag name
+    if (
+      seg.kind === "text" &&
+      seg.content.trim() === "" &&
+      merged.length > 0 &&
+      merged[merged.length - 1].kind === "tag"
+    ) {
+      const next = segments[i + 1];
+      if (next?.kind === "tag" && next.tag === (merged[merged.length - 1] as { tag: string }).tag) {
+        continue; // drop the whitespace, next iteration will merge the tags
+      }
+    }
+    const prev = merged[merged.length - 1];
+    if (seg.kind === "tag" && prev?.kind === "tag" && prev.tag === seg.tag) {
+      prev.content += seg.content;
+    } else {
+      merged.push(seg);
+    }
+  }
+
+  return merged;
 }
 
 /** Compact inline badge for tool use events (Read, Update, Run, etc.) */

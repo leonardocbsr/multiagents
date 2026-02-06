@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from ..chat.events import (
     AgentCompleted,
+    AgentDeliveryAcked,
     AgentInterrupted,
     AgentNotice,
     AgentPermissionRequested,
@@ -56,6 +57,15 @@ def event_to_dict(event: ChatEvent) -> dict:
             return {"type": "agent_interrupted", "agent": agent, "round": rn, "partial_text": text, "created_at": _ts()}
         case AgentPromptAssembled(agent_name=agent, round_number=rn, sections=sections):
             return {"type": "agent_prompt", "agent": agent, "round": rn, "sections": sections}
+        case AgentDeliveryAcked(delivery_id=delivery_id, recipient=recipient, sender=sender, round_number=rn):
+            return {
+                "type": "delivery_acked",
+                "delivery_id": delivery_id,
+                "recipient": recipient,
+                "sender": sender,
+                "round": rn,
+                "created_at": _ts(),
+            }
         case AgentPermissionRequested(agent_name=agent, round_number=rn, request_id=rid, tool_name=tool, tool_input=tinput, description=desc):
             return {
                 "type": "permission_request", "agent": agent, "round": rn,

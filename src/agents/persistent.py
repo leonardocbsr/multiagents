@@ -7,7 +7,7 @@ import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, AsyncIterator
 
-from .protocols.base import AgentEvent, TurnComplete
+from .protocols.base import AgentEvent, ProcessRestarted, TurnComplete
 
 if TYPE_CHECKING:
     from .protocols.base import ProtocolAdapter
@@ -141,6 +141,7 @@ class PersistentAgent:
                     "[%s] process died (%s), respawning in %.1fs (retry %d/%d)",
                     self.agent_name, e, backoff, retries, _MAX_RETRIES,
                 )
+                yield ProcessRestarted(reason=str(e), retry=retries)
                 await asyncio.sleep(backoff)
                 # Kill stale process if still around
                 if self.proc and self.proc.returncode is None:

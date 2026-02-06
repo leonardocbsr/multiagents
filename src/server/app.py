@@ -49,6 +49,7 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
 # Rate limiting: max messages per window
 _RATE_LIMIT_WINDOW = 10.0  # seconds
 _RATE_LIMIT_MAX = 100  # messages per window
+_SUPPORTED_AGENT_TYPES = frozenset({"claude", "codex", "kimi"})
 
 
 def _validate_ws_message(msg: dict) -> str | None:
@@ -134,6 +135,47 @@ def create_app(
         invalid = [k for k in config if k not in DEFAULTS]
         if invalid:
             return f"Unknown settings keys: {invalid}"
+        return None
+
+    def _validate_create_session_agents(agents: object) -> str | None:
+        if not isinstance(agents, list):
+            return "'agents' must be an array"
+        if not agents:
+            return "'agents' must include at least one agent"
+        seen_names: set[str] = set()
+        for i, item in enumerate(agents):
+            if isinstance(item, str):
+                agent_type = item.strip()
+                if not agent_type:
+                    return f"Invalid agents[{i}]: agent name/type cannot be empty"
+                name = agent_type
+            elif isinstance(item, dict):
+                raw_type = item.get("type")
+                if not isinstance(raw_type, str) or not raw_type.strip():
+                    return f"Invalid agents[{i}]: 'type' must be a non-empty string"
+                agent_type = raw_type.strip()
+                raw_name = item.get("name", agent_type)
+                if not isinstance(raw_name, str) or not raw_name.strip():
+                    return f"Invalid agents[{i}]: 'name' must be a non-empty string"
+                name = raw_name.strip()
+                role = item.get("role", "")
+                if not isinstance(role, str):
+                    return f"Invalid agents[{i}]: 'role' must be a string"
+                model = item.get("model")
+                if model is not None and not isinstance(model, str):
+                    return f"Invalid agents[{i}]: 'model' must be a string or null"
+            else:
+                return f"Invalid agents[{i}]: expected string or object"
+
+            if agent_type not in _SUPPORTED_AGENT_TYPES:
+                return (
+                    f"Invalid agents[{i}]: unsupported agent type '{agent_type}'. "
+                    f"Supported types: {sorted(_SUPPORTED_AGENT_TYPES)}"
+                )
+            name_key = name.lower()
+            if name_key in seen_names:
+                return f"Invalid agents: duplicate name '{name}'"
+            seen_names.add(name_key)
         return None
 
     @asynccontextmanager
@@ -419,6 +461,11 @@ def create_app(
                     if working_dir:
                         working_dir = str(Path(working_dir).expanduser().resolve())
                     agents_spec = msg.get("agents", agents_list)
+                    if "agents" in msg:
+                        error = _validate_create_session_agents(agents_spec)
+                        if error:
+                            await ws.send_json({"type": "error", "message": error})
+                            continue
                     agents_spec = _agents_with_models(agents_spec)
                     session_config = msg.get("config")
                     error = _validate_session_config(session_config)

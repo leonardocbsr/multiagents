@@ -8,6 +8,7 @@ from src.agents.base import AgentResponse
 from src.chat.room import ChatRoom
 from src.chat.events import (
     AgentCompleted,
+    AgentDeliveryAcked,
     AgentNotice,
     AgentPromptAssembled,
     RoundPaused,
@@ -290,14 +291,14 @@ def test_persistent_drain_inbox_batch_collects_buffered_events():
     agent = PersistentSequencedAgent("claude", responses=[(0.00, "[PASS]")])
     room = ChatRoom([agent])
     room._inboxes = {"claude": asyncio.Queue()}
-    room._inboxes["claude"].put_nowait(("user", "second", 1))
-    room._inboxes["claude"].put_nowait(("system", "notice", 1))
+    room._inboxes["claude"].put_nowait(("user", "second", 1, "d2"))
+    room._inboxes["claude"].put_nowait(("system", "notice", 1, "d3"))
 
-    batch = room._drain_inbox_batch("claude", ("user", "first", 1))
+    batch = room._drain_inbox_batch("claude", ("user", "first", 1, "d1"))
     assert batch == [
-        ("user", "first", 1),
-        ("user", "second", 1),
-        ("system", "notice", 1),
+        ("user", "first", 1, "d1"),
+        ("user", "second", 1, "d2"),
+        ("system", "notice", 1, "d3"),
     ]
 
 
@@ -308,9 +309,9 @@ def test_persistent_batch_prompt_combines_events():
     prompt = room._format_persistent_events_prompt(
         agent=agent,
         events=[
-            ("user", "first request", 1),
-            ("system", "board changed", 1),
-            ("codex", "new findings", 1),
+            ("user", "first request", 1, "d1"),
+            ("system", "board changed", 1, "d2"),
+            ("codex", "new findings", 1, "d3"),
         ],
         is_first_message=False,
     )
@@ -329,6 +330,70 @@ def test_relay_dedup_blocks_repeated_share_within_cooldown():
     # Whitespace/case variations are treated as duplicates.
     assert room._should_relay_share("Claude", "Codex", "  SAME   finding ") is False
 
+
+def test_delivery_ack_tracking_clears_when_all_recipients_ack():
+    a1 = PersistentSequencedAgent("claude", responses=[(0.00, "[PASS]")])
+    a2 = PersistentSequencedAgent("codex", responses=[(0.00, "[PASS]")])
+    room = ChatRoom([a1, a2])
+    queue: asyncio.Queue = asyncio.Queue()
+
+    delivery_id = room._enqueue_delivery(
+        sender="claude",
+        message="share",
+        round_number=1,
+        recipients=["claude", "codex"],
+    )
+    assert delivery_id is not None
+    assert room._delivery_pending[delivery_id] == {"claude", "codex"}
+
+    room._ack_delivery(
+        event_queue=queue,
+        delivery_id=delivery_id,
+        recipient="claude",
+        sender="claude",
+        round_number=1,
+    )
+    assert delivery_id in room._delivery_pending
+    assert room._delivery_pending[delivery_id] == {"codex"}
+
+    room._ack_delivery(
+        event_queue=queue,
+        delivery_id=delivery_id,
+        recipient="codex",
+        sender="claude",
+        round_number=1,
+    )
+    assert delivery_id not in room._delivery_pending
+
+    e1 = queue.get_nowait()
+    e2 = queue.get_nowait()
+    assert isinstance(e1, AgentDeliveryAcked)
+    assert isinstance(e2, AgentDeliveryAcked)
+    assert {e1.recipient, e2.recipient} == {"claude", "codex"}
+
+
+def test_drop_agent_pending_deliveries_removes_stale_entries():
+    a1 = PersistentSequencedAgent("claude", responses=[(0.00, "[PASS]")])
+    a2 = PersistentSequencedAgent("codex", responses=[(0.00, "[PASS]")])
+    room = ChatRoom([a1, a2])
+
+    d1 = room._enqueue_delivery(
+        sender="user",
+        message="m1",
+        round_number=1,
+        recipients=["claude", "codex"],
+    )
+    d2 = room._enqueue_delivery(
+        sender="user",
+        message="m2",
+        round_number=1,
+        recipients=["codex"],
+    )
+    assert d1 and d2
+
+    room._drop_agent_pending_deliveries("codex")
+    assert room._delivery_pending[d1] == {"claude"}
+    assert d2 not in room._delivery_pending
 
 @pytest.mark.asyncio
 async def test_persistent_round_attribution_with_overlap():
@@ -466,6 +531,107 @@ async def test_persistent_prompt_templates_cover_user_and_relay_events():
         if p.agent_name == "codex" and "shared:\ncheck this from claude" in p.sections.get("message", "")
     )
     assert "Only respond if you can add net-new value" in relay_for_codex.sections["message"]
+
+
+@pytest.mark.asyncio
+async def test_persistent_relay_emits_delivery_acks_for_recipients():
+    claude = PersistentSequencedAgent(
+        "claude",
+        responses=[
+            (0.00, "<Share>delivery check</Share>"),
+            (0.00, "[PASS]"),
+        ],
+    )
+    codex = PersistentSequencedAgent("codex", responses=[(0.00, "[PASS]")])
+    kimi = PersistentSequencedAgent("kimi", responses=[(0.00, "[PASS]")])
+    room = ChatRoom([claude, codex, kimi])
+
+    events = []
+    async for event in room.run_persistent("start"):
+        events.append(event)
+        relay_acks = [
+            e for e in events
+            if isinstance(e, AgentDeliveryAcked)
+            and e.sender == "claude"
+            and e.round_number == 1
+        ]
+        recipients = {e.recipient for e in relay_acks}
+        if {"codex", "kimi"}.issubset(recipients):
+            break
+
+    relay_acks = [
+        e for e in events
+        if isinstance(e, AgentDeliveryAcked)
+        and e.sender == "claude"
+        and e.round_number == 1
+    ]
+    assert {e.recipient for e in relay_acks} >= {"codex", "kimi"}
+
+
+@pytest.mark.asyncio
+async def test_persistent_non_consensus_settlement_starts_next_round_and_relays_share():
+    claude = PersistentSequencedAgent(
+        "claude",
+        responses=[
+            (0.00, "[PASS]"),
+            (0.00, "[PASS]"),
+        ],
+    )
+    codex = PersistentSequencedAgent(
+        "codex",
+        responses=[
+            (0.00, "[PASS]"),
+            (0.00, "[PASS]"),
+        ],
+    )
+    kimi = PersistentSequencedAgent(
+        "kimi",
+        responses=[
+            (0.05, "<Share>critical finding</Share>"),
+        ],
+    )
+    room = ChatRoom([claude, codex, kimi])
+
+    events = []
+    async for event in room.run_persistent("start"):
+        events.append(event)
+        saw_round1_end = any(
+            isinstance(e, RoundEnded) and e.round_number == 1 and not e.all_passed
+            for e in events
+        )
+        saw_round2_start = any(
+            isinstance(e, RoundStarted) and e.round_number == 2
+            for e in events
+        )
+        relay_prompts = [
+            e for e in events
+            if isinstance(e, AgentPromptAssembled)
+            and e.agent_name in {"claude", "codex"}
+            and "shared:\ncritical finding" in e.sections.get("message", "")
+        ]
+        if saw_round1_end and saw_round2_start and len(relay_prompts) >= 2:
+            break
+
+    assert any(
+        isinstance(e, RoundEnded) and e.round_number == 1 and not e.all_passed
+        for e in events
+    )
+    assert any(
+        isinstance(e, RoundStarted) and e.round_number == 2
+        for e in events
+    )
+    assert any(
+        isinstance(e, AgentPromptAssembled)
+        and e.agent_name == "claude"
+        and "shared:\ncritical finding" in e.sections.get("message", "")
+        for e in events
+    )
+    assert any(
+        isinstance(e, AgentPromptAssembled)
+        and e.agent_name == "codex"
+        and "shared:\ncritical finding" in e.sections.get("message", "")
+        for e in events
+    )
 
 
 @pytest.mark.asyncio

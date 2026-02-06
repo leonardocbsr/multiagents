@@ -140,6 +140,48 @@ def test_ws_create_session_rejects_unknown_config_key(client):
         assert "Unknown settings keys" in err["message"]
 
 
+def test_ws_create_session_rejects_non_array_agents(client):
+    with client.websocket_connect("/ws") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "connected"
+        ws.send_json({
+            "type": "create_session",
+            "agents": "claude",
+        })
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert "'agents' must be an array" in err["message"]
+
+
+def test_ws_create_session_rejects_duplicate_agent_names(client):
+    with client.websocket_connect("/ws") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "connected"
+        ws.send_json({
+            "type": "create_session",
+            "agents": [
+                {"name": "codex", "type": "codex", "role": ""},
+                {"name": "codex", "type": "claude", "role": ""},
+            ],
+        })
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert "duplicate name 'codex'" in err["message"]
+
+
+def test_ws_create_session_rejects_unsupported_agent_type(client):
+    with client.websocket_connect("/ws") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "connected"
+        ws.send_json({
+            "type": "create_session",
+            "agents": [{"name": "writer", "type": "gpt", "role": ""}],
+        })
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert "unsupported agent type 'gpt'" in err["message"]
+
+
 def test_ws_running_message_not_double_broadcast(monkeypatch, tmp_path):
     class FakeRunner:
         last_instance = None

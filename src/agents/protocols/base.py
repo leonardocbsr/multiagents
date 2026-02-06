@@ -60,6 +60,13 @@ class PermissionRequest(AgentEvent):
 
 
 @dataclass
+class ProcessRestarted(AgentEvent):
+    """Persistent process was restarted and the turn will be retried."""
+    reason: str = ""
+    retry: int = 0
+
+
+@dataclass
 class PermissionResponse:
     """User decision on a permission request."""
     request_id: str = ""

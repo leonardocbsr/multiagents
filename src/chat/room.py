@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from collections.abc import AsyncGenerator, Callable
 
 from ..agents.base import AgentNotice as BaseAgentNotice, AgentPermissionRequest, AgentResponse, BaseAgent
 from .events import (
     AgentCompleted,
+    AgentDeliveryAcked,
     AgentInterrupted,
     AgentNotice,
     AgentPermissionRequested,
@@ -31,6 +33,22 @@ _PERSISTENT_REPLY_DIRECTIVE = (
 )
 _RELAY_DEDUP_COOLDOWN_SECONDS = 8.0
 _RELAY_DEDUP_MAX_ENTRIES = 2048
+
+
+@dataclass
+class _PersistentState:
+    round_number: int
+    event_queue: asyncio.Queue[ChatEvent | None]
+    agent_idle: dict[str, bool]
+    agent_passed: dict[str, bool]
+    agent_initialized: dict[str, bool]
+    agent_tasks: dict[str, asyncio.Task]
+    settlement_signaled: bool = False
+    round_has_activity: bool = False
+    round_open: bool = True
+
+
+type InboxEvent = tuple[str, str, int | None, str | None]
 
 
 class ChatRoom:
@@ -61,8 +79,10 @@ class ChatRoom:
         self._remove_agent_queue: asyncio.Queue[str] = asyncio.Queue()
         self._dm_debounce_timers: dict[str, asyncio.TimerHandle] = {}
         self._dm_debounce_texts: dict[str, list[str]] = {}
-        self._inboxes: dict[str, asyncio.Queue[tuple[str, str, int | None]]] = {}
+        self._inboxes: dict[str, asyncio.Queue[InboxEvent]] = {}
         self._recent_relays: dict[tuple[str, str, str], float] = {}
+        self._delivery_seq = 0
+        self._delivery_pending: dict[str, set[str]] = {}
 
     def add_agent(self, agent: BaseAgent) -> None:
         """Queue an agent to join. If a round is in progress, it joins immediately."""
@@ -147,7 +167,67 @@ class ChatRoom:
         """Queue a DM to a specific agent's persistent-mode inbox."""
         inbox = self._inboxes.get(name)
         if inbox:
-            inbox.put_nowait(("dm", text, None))
+            delivery_id = self._next_delivery_id()
+            self._delivery_pending[delivery_id] = {name}
+            inbox.put_nowait(("dm", text, None, delivery_id))
+
+    def _next_delivery_id(self) -> str:
+        self._delivery_seq += 1
+        return f"d{self._delivery_seq}"
+
+    def _enqueue_delivery(
+        self,
+        *,
+        sender: str,
+        message: str,
+        round_number: int | None,
+        recipients: list[str],
+    ) -> str | None:
+        if not recipients:
+            return None
+        delivery_id = self._next_delivery_id()
+        self._delivery_pending[delivery_id] = set(recipients)
+        for recipient in recipients:
+            inbox = self._inboxes.get(recipient)
+            if inbox is None:
+                continue
+            inbox.put_nowait((sender, message, round_number, delivery_id))
+        return delivery_id
+
+    def _ack_delivery(
+        self,
+        *,
+        event_queue: asyncio.Queue[ChatEvent | None],
+        delivery_id: str | None,
+        recipient: str,
+        sender: str,
+        round_number: int | None,
+    ) -> None:
+        if not delivery_id:
+            return
+        pending = self._delivery_pending.get(delivery_id)
+        if not pending or recipient not in pending:
+            return
+        pending.discard(recipient)
+        event_queue.put_nowait(
+            AgentDeliveryAcked(
+                delivery_id=delivery_id,
+                recipient=recipient,
+                sender=sender,
+                round_number=round_number,
+            )
+        )
+        if not pending:
+            self._delivery_pending.pop(delivery_id, None)
+
+    def _drop_agent_pending_deliveries(self, name: str) -> None:
+        stale = []
+        for delivery_id, pending in self._delivery_pending.items():
+            pending.discard(name)
+            if not pending:
+                stale.append(delivery_id)
+        for delivery_id in stale:
+            self._delivery_pending.pop(delivery_id, None)
 
     @staticmethod
     def _normalize_relay_text(text: str) -> str:
@@ -247,8 +327,8 @@ class ChatRoom:
     def _drain_inbox_batch(
         self,
         agent_name: str,
-        first_event: tuple[str, str, int | None],
-    ) -> list[tuple[str, str, int | None]]:
+        first_event: InboxEvent,
+    ) -> list[InboxEvent]:
         """Drain currently buffered inbox items so one turn can process a batch."""
         inbox = self._inboxes.get(agent_name)
         events = [first_event]
@@ -261,14 +341,230 @@ class ChatRoom:
                 break
         return events
 
+    def _init_persistent_state(
+        self,
+        initial_prompt: str | None,
+        start_round: int,
+    ) -> _PersistentState:
+        round_number = start_round + 1
+        event_queue: asyncio.Queue[ChatEvent | None] = asyncio.Queue()
+
+        self._inboxes = {a.name: asyncio.Queue() for a in self.agents}
+        agent_idle = {a.name: False for a in self.agents}
+        agent_passed = {a.name: False for a in self.agents}
+        agent_initialized = {a.name: False for a in self.agents}
+        self._stop_events = {a.name: asyncio.Event() for a in self.agents}
+
+        seed_text = initial_prompt
+        if not seed_text:
+            for msg in reversed(self.history):
+                if msg["role"] == "user":
+                    seed_text = msg["content"]
+                    break
+        if seed_text:
+            self._enqueue_delivery(
+                sender="user",
+                message=seed_text,
+                round_number=round_number,
+                recipients=[a.name for a in self.agents],
+            )
+
+        return _PersistentState(
+            round_number=round_number,
+            event_queue=event_queue,
+            agent_idle=agent_idle,
+            agent_passed=agent_passed,
+            agent_initialized=agent_initialized,
+            agent_tasks={},
+            settlement_signaled=False,
+            round_has_activity=bool(seed_text),
+            round_open=True,
+        )
+
+    def _try_signal_persistent_settlement(self, state: _PersistentState) -> None:
+        if state.settlement_signaled:
+            return
+        if not state.round_has_activity:
+            return
+        if not all(state.agent_idle.values()):
+            return
+        if not all(q.empty() for q in self._inboxes.values()):
+            return
+        state.settlement_signaled = True
+        state.event_queue.put_nowait(None)
+
+    async def _consume_persistent_stream(
+        self,
+        *,
+        agent: BaseAgent,
+        prompt: str,
+        message_round: int,
+        partial_chunks: list[str],
+        event_queue: asyncio.Queue[ChatEvent | None],
+    ) -> AgentResponse | None:
+        response: AgentResponse | None = None
+        async for item in agent.stream(prompt, self.timeout):
+            if isinstance(item, AgentResponse):
+                response = item
+                is_pass = detect_pass(item.response)
+                if item.stderr:
+                    await event_queue.put(
+                        AgentStderr(
+                            agent_name=agent.name,
+                            round_number=message_round,
+                            text=item.stderr,
+                        )
+                    )
+                await event_queue.put(
+                    AgentCompleted(
+                        agent_name=agent.name,
+                        round_number=message_round,
+                        response=item,
+                        passed=is_pass,
+                    )
+                )
+            elif isinstance(item, AgentPermissionRequest):
+                await event_queue.put(
+                    AgentPermissionRequested(
+                        agent_name=item.agent,
+                        round_number=message_round,
+                        request_id=item.request_id,
+                        tool_name=item.tool_name,
+                        tool_input=item.tool_input,
+                        description=item.description,
+                    )
+                )
+            elif isinstance(item, BaseAgentNotice):
+                await event_queue.put(
+                    AgentNotice(agent_name=item.agent, message=item.message)
+                )
+            elif isinstance(item, str):
+                partial_chunks.append(item)
+                await event_queue.put(
+                    AgentStreamChunk(
+                        agent_name=agent.name,
+                        round_number=message_round,
+                        text=item,
+                    )
+                )
+        return response
+
+    async def _handle_persistent_timeout(
+        self,
+        *,
+        agent: BaseAgent,
+        message_round: int,
+        state: _PersistentState,
+    ) -> None:
+        response = AgentResponse(
+            agent=agent.name,
+            response="Timeout",
+            success=False,
+            latency_ms=0,
+        )
+        await state.event_queue.put(
+            AgentCompleted(
+                agent_name=agent.name,
+                round_number=message_round,
+                response=response,
+                passed=False,
+                stopped=True,
+            )
+        )
+        self._any_stopped_this_round = True
+        self._stop_events[agent.name] = asyncio.Event()
+        state.agent_passed[agent.name] = False
+        state.agent_idle[agent.name] = True
+        self._try_signal_persistent_settlement(state)
+
+    async def _handle_persistent_stopped_stream(
+        self,
+        *,
+        agent: BaseAgent,
+        message_round: int,
+        partial_chunks: list[str],
+        state: _PersistentState,
+    ) -> None:
+        partial_text = "".join(partial_chunks).strip() or "(stopped)"
+        response = AgentResponse(
+            agent=agent.name,
+            response=partial_text,
+            success=False,
+            latency_ms=0,
+        )
+        await state.event_queue.put(
+            AgentCompleted(
+                agent_name=agent.name,
+                round_number=message_round,
+                response=response,
+                passed=False,
+                stopped=True,
+            )
+        )
+        self._any_stopped_this_round = True
+        self._stop_events[agent.name] = asyncio.Event()
+        state.agent_passed[agent.name] = False
+        state.agent_idle[agent.name] = True
+        self._try_signal_persistent_settlement(state)
+
+    def _process_persistent_agent_response(
+        self,
+        *,
+        agent: BaseAgent,
+        response: AgentResponse,
+        message_round: int,
+        state: _PersistentState,
+    ) -> None:
+        is_pass = detect_pass(response.response)
+        if is_pass:
+            state.agent_passed[agent.name] = True
+            state.agent_idle[agent.name] = True
+            self.history.append({
+                "role": agent.name, "content": "[PASS]",
+                "round": message_round,
+            })
+            self._try_signal_persistent_settlement(state)
+            return
+
+        state.agent_passed[agent.name] = False
+        shareable = extract_shareable(response.response)
+        self.history.append({
+            "role": agent.name,
+            "content": shareable or PLACEHOLDER,
+            "round": message_round,
+        })
+        state.agent_idle[agent.name] = True
+        if shareable and shareable != PLACEHOLDER:
+            targets: list[str] = []
+            for other in self.agents:
+                if other.name != agent.name and self._should_relay_share(agent.name, other.name, shareable):
+                    targets.append(other.name)
+                    state.agent_idle[other.name] = False
+            self._enqueue_delivery(
+                sender=agent.name,
+                message=shareable,
+                round_number=message_round,
+                recipients=targets,
+            )
+
+    def _restart_dead_persistent_loops(
+        self,
+        state: _PersistentState,
+        agent_loop_factory: Callable[[BaseAgent], asyncio.Task],
+    ) -> None:
+        for agent in self.agents:
+            task = state.agent_tasks.get(agent.name)
+            if task and task.done():
+                state.agent_tasks[agent.name] = agent_loop_factory(agent)
+
     def _format_persistent_events_prompt(
         self,
         agent: BaseAgent,
-        events: list[tuple[str, str, int | None]],
+        events: list[InboxEvent],
         is_first_message: bool,
     ) -> str:
         if len(events) == 1:
-            sender, message, _ = events[0]
+            sender, message, _, _ = events[0]
             return self._format_persistent_prompt(
                 agent=agent,
                 sender=sender,
@@ -293,7 +589,7 @@ class ChatRoom:
 
         incoming = "\n\n".join(
             self._format_incoming_event(sender, message)
-            for sender, message, _ in events
+            for sender, message, _, _ in events
         )
         return (
             f"{prelude}"
@@ -311,98 +607,59 @@ class ChatRoom:
         Each agent has an inbox. Shares are relayed immediately to other agents.
         The user can broadcast (inject_user_message) or DM (_dm_to_inbox).
         Rounds are implicit: a round settles when all agents are idle and inboxes
-        are empty; a new round starts only after all agents return [PASS].
+        are empty; non-consensus settlements immediately advance to a fresh round.
         """
         if initial_prompt:
             self.history.append({"role": "user", "content": initial_prompt})
-
-        round_number = start_round + 1
-        event_queue: asyncio.Queue[ChatEvent | None] = asyncio.Queue()
-
-        # Per-agent inboxes: (sender, message) tuples
-        self._inboxes: dict[str, asyncio.Queue[tuple[str, str, int | None]]] = {
-            a.name: asyncio.Queue() for a in self.agents
-        }
-        # Track whether an agent currently has no pending work.
-        agent_idle: dict[str, bool] = {a.name: False for a in self.agents}
-        # Track whether latest response was an explicit [PASS]
-        agent_passed: dict[str, bool] = {a.name: False for a in self.agents}
-        # Track whether each agent has been initialized (first message includes context)
-        agent_initialized: dict[str, bool] = {a.name: False for a in self.agents}
-        # Stop events for cancellation
-        self._stop_events = {a.name: asyncio.Event() for a in self.agents}
-        # Track active agent tasks
-        agent_tasks: dict[str, asyncio.Task] = {}
-
-        # Seed initial prompt to all inboxes
-        seed_text = initial_prompt
-        if not seed_text:
-            # Runner pre-loads history — extract last user message
-            for msg in reversed(self.history):
-                if msg["role"] == "user":
-                    seed_text = msg["content"]
-                    break
-        if seed_text:
-            for a in self.agents:
-                self._inboxes[a.name].put_nowait(("user", seed_text, round_number))
+        state = self._init_persistent_state(initial_prompt, start_round)
 
         self._any_stopped_this_round = False
         self._pause_on_stop = True
-        yield RoundStarted(round_number=round_number, agents=[a.name for a in self.agents])
-        round_open = True
-
-        settlement_signaled = False
-        round_has_activity = bool(seed_text)
-
-        def _try_signal_settlement() -> None:
-            """Signal settlement exactly once when all agents are idle with empty inboxes."""
-            nonlocal settlement_signaled
-            if settlement_signaled:
-                return
-            if not round_has_activity:
-                return
-            if not all(agent_idle.values()):
-                return
-            if not all(q.empty() for q in self._inboxes.values()):
-                return
-            settlement_signaled = True
-            event_queue.put_nowait(None)
+        yield RoundStarted(round_number=state.round_number, agents=[a.name for a in self.agents])
 
         async def agent_loop(agent: BaseAgent) -> None:
             """Each agent loops: wait for inbox → send to agent → stream → relay shares."""
             while True:
                 # Wait for a message in our inbox
                 try:
-                    sender, message, inbox_round = await asyncio.wait_for(
+                    sender, message, inbox_round, delivery_id = await asyncio.wait_for(
                         self._inboxes[agent.name].get(), timeout=0.2,
                     )
                 except asyncio.TimeoutError:
-                    _try_signal_settlement()
-                    if settlement_signaled:
+                    self._try_signal_persistent_settlement(state)
+                    if state.settlement_signaled:
                         await asyncio.sleep(0.05)
                     continue
 
-                agent_idle[agent.name] = False
-                agent_passed[agent.name] = False
+                state.agent_idle[agent.name] = False
+                state.agent_passed[agent.name] = False
                 batched_events = self._drain_inbox_batch(
-                    agent.name, (sender, message, inbox_round),
+                    agent.name, (sender, message, inbox_round, delivery_id),
                 )
+                for batch_sender, _, batch_round, batch_delivery_id in batched_events:
+                    self._ack_delivery(
+                        event_queue=state.event_queue,
+                        delivery_id=batch_delivery_id,
+                        recipient=agent.name,
+                        sender=batch_sender,
+                        round_number=batch_round,
+                    )
                 round_markers = [
-                    r for _, _, r in batched_events if isinstance(r, int)
+                    r for _, _, r, _ in batched_events if isinstance(r, int)
                 ]
-                message_round = max(round_markers) if round_markers else round_number
+                message_round = max(round_markers) if round_markers else state.round_number
 
                 # Format the message for the agent
                 prompt = self._format_persistent_events_prompt(
                     agent=agent,
                     events=batched_events,
-                    is_first_message=not agent_initialized[agent.name],
+                    is_first_message=not state.agent_initialized[agent.name],
                 )
-                if not agent_initialized[agent.name]:
-                    agent_initialized[agent.name] = True
+                if not state.agent_initialized[agent.name]:
+                    state.agent_initialized[agent.name] = True
 
                 # Emit prompt visibility event
-                await event_queue.put(AgentPromptAssembled(
+                await state.event_queue.put(AgentPromptAssembled(
                     agent_name=agent.name,
                     round_number=message_round,
                     sections={"message": prompt},
@@ -413,55 +670,16 @@ class ChatRoom:
                 partial_chunks: list[str] = []
                 response: AgentResponse | None = None
 
-                async def consume() -> None:
-                    nonlocal response
-                    async for item in agent.stream(prompt, self.timeout):
-                        if isinstance(item, AgentResponse):
-                            response = item
-                            is_pass = detect_pass(item.response)
-                            if item.stderr:
-                                await event_queue.put(
-                                    AgentStderr(
-                                        agent_name=agent.name,
-                                        round_number=message_round,
-                                        text=item.stderr,
-                                    )
-                                )
-                            await event_queue.put(
-                                AgentCompleted(
-                                    agent_name=agent.name,
-                                    round_number=message_round,
-                                    response=item,
-                                    passed=is_pass,
-                                )
-                            )
-                        elif isinstance(item, AgentPermissionRequest):
-                            await event_queue.put(
-                                AgentPermissionRequested(
-                                    agent_name=item.agent,
-                                    round_number=message_round,
-                                    request_id=item.request_id,
-                                    tool_name=item.tool_name,
-                                    tool_input=item.tool_input,
-                                    description=item.description,
-                                )
-                            )
-                        elif isinstance(item, BaseAgentNotice):
-                            await event_queue.put(
-                                AgentNotice(agent_name=item.agent, message=item.message)
-                            )
-                        elif isinstance(item, str):
-                            partial_chunks.append(item)
-                            await event_queue.put(
-                                AgentStreamChunk(
-                                    agent_name=agent.name,
-                                    round_number=message_round,
-                                    text=item,
-                                )
-                            )
-
                 try:
-                    stream_task = asyncio.create_task(consume())
+                    stream_task = asyncio.create_task(
+                        self._consume_persistent_stream(
+                            agent=agent,
+                            prompt=prompt,
+                            message_round=message_round,
+                            partial_chunks=partial_chunks,
+                            event_queue=state.event_queue,
+                        )
+                    )
                     stop_task = asyncio.create_task(stop_event.wait())
 
                     done, pending = await asyncio.wait(
@@ -488,24 +706,11 @@ class ChatRoom:
                                 await p
                             except (asyncio.CancelledError, Exception):
                                 pass
-                        response = AgentResponse(
-                            agent=agent.name,
-                            response="Timeout",
-                            success=False,
-                            latency_ms=0,
+                        await self._handle_persistent_timeout(
+                            agent=agent,
+                            message_round=message_round,
+                            state=state,
                         )
-                        await event_queue.put(
-                            AgentCompleted(
-                                agent_name=agent.name,
-                                round_number=message_round,
-                                response=response,
-                                passed=False,
-                                stopped=True,
-                            )
-                        )
-                        self._any_stopped_this_round = True
-                        self._stop_events[agent.name] = asyncio.Event()
-                        stop_event = self._stop_events[agent.name]
                         continue
 
                     if stop_task in done and not stream_task.done():
@@ -525,26 +730,16 @@ class ChatRoom:
                         exc = stream_task.exception()
                         if exc is not None:
                             raise exc
+                        response = stream_task.result()
 
                     # Stopped mid-stream
                     if stop_event.is_set() and response is None:
-                        partial_text = "".join(partial_chunks).strip() or "(stopped)"
-                        response = AgentResponse(
-                            agent=agent.name, response=partial_text,
-                            success=False, latency_ms=0,
+                        await self._handle_persistent_stopped_stream(
+                            agent=agent,
+                            message_round=message_round,
+                            partial_chunks=partial_chunks,
+                            state=state,
                         )
-                        await event_queue.put(
-                            AgentCompleted(
-                                agent_name=agent.name,
-                                round_number=message_round,
-                                response=response,
-                                passed=False, stopped=True,
-                            )
-                        )
-                        self._any_stopped_this_round = True
-                        # Reset stop event for next message
-                        self._stop_events[agent.name] = asyncio.Event()
-                        stop_event = self._stop_events[agent.name]
                         continue
 
                 except asyncio.CancelledError:
@@ -556,7 +751,7 @@ class ChatRoom:
                             agent=agent.name, response=str(e),
                             success=False, latency_ms=0,
                         )
-                        await event_queue.put(
+                        await state.event_queue.put(
                             AgentCompleted(
                                 agent_name=agent.name,
                                 round_number=message_round,
@@ -568,98 +763,82 @@ class ChatRoom:
                 if response is None:
                     continue
 
-                # Process the response: extract shares, relay to others
-                is_pass = detect_pass(response.response)
-                if is_pass:
-                    agent_passed[agent.name] = True
-                    agent_idle[agent.name] = True
-                    self.history.append({
-                        "role": agent.name, "content": "[PASS]",
-                        "round": message_round,
-                    })
-                    _try_signal_settlement()
-                    if settlement_signaled:
-                        return
-                else:
-                    agent_passed[agent.name] = False
-                    shareable = extract_shareable(response.response)
-                    self.history.append({
-                        "role": agent.name,
-                        "content": shareable or PLACEHOLDER,
-                        "round": message_round,
-                    })
-                    agent_idle[agent.name] = True
-                    # Relay share content to other agents immediately
-                    if shareable and shareable != PLACEHOLDER:
-                        for other in self.agents:
-                            if other.name != agent.name:
-                                if self._should_relay_share(agent.name, other.name, shareable):
-                                    self._inboxes[other.name].put_nowait(
-                                        (agent.name, shareable, message_round)
-                                    )
-                                    # Wake up idle agents
-                                    agent_idle[other.name] = False
+                self._process_persistent_agent_response(
+                    agent=agent,
+                    response=response,
+                    message_round=message_round,
+                    state=state,
+                )
+                if state.settlement_signaled:
+                    return
 
         # Start agent loops
         for agent in self.agents:
-            agent_tasks[agent.name] = asyncio.create_task(
+            state.agent_tasks[agent.name] = asyncio.create_task(
                 agent_loop(agent), name=f"persistent-{agent.name}",
             )
 
         def _restart_dead_loops() -> None:
-            """Restart agent loops that exited after settlement."""
-            for agent in self.agents:
-                task = agent_tasks.get(agent.name)
-                if task and task.done():
-                    agent_tasks[agent.name] = asyncio.create_task(
-                        agent_loop(agent), name=f"persistent-{agent.name}",
-                    )
+            self._restart_dead_persistent_loops(
+                state,
+                lambda a: asyncio.create_task(agent_loop(a), name=f"persistent-{a.name}"),
+            )
 
         # Main event pump: yield events to caller, handle user injections
         try:
             while True:
                 # Process user message injections
                 while not self._user_queue.empty():
-                    if not round_open:
+                    if not state.round_open:
                         self._any_stopped_this_round = False
                         self._pause_on_stop = True
-                        round_open = True
+                        state.round_open = True
                         yield RoundStarted(
-                            round_number=round_number,
+                            round_number=state.round_number,
                             agents=[a.name for a in self.agents],
                         )
                     text = self._user_queue.get_nowait()
                     self.history.append({"role": "user", "content": text})
                     yield UserMessageReceived(text=text)
                     # Reset settlement so agents can re-engage
-                    settlement_signaled = False
-                    round_has_activity = True
+                    state.settlement_signaled = False
+                    state.round_has_activity = True
                     # Broadcast to all agents
                     for a in self.agents:
-                        self._inboxes[a.name].put_nowait(("user", text, round_number))
-                        agent_idle[a.name] = False
-                        agent_passed[a.name] = False
+                        state.agent_idle[a.name] = False
+                        state.agent_passed[a.name] = False
+                    self._enqueue_delivery(
+                        sender="user",
+                        message=text,
+                        round_number=state.round_number,
+                        recipients=[a.name for a in self.agents],
+                    )
                     _restart_dead_loops()
 
                 # Process system message injections
                 while not self._system_queue.empty():
-                    if not round_open:
+                    if not state.round_open:
                         self._any_stopped_this_round = False
                         self._pause_on_stop = True
-                        round_open = True
+                        state.round_open = True
                         yield RoundStarted(
-                            round_number=round_number,
+                            round_number=state.round_number,
                             agents=[a.name for a in self.agents],
                         )
                     text = self._system_queue.get_nowait()
                     self.history.append({"role": "system", "content": text})
                     yield AgentNotice(agent_name="system", message=text)
-                    settlement_signaled = False
-                    round_has_activity = True
+                    state.settlement_signaled = False
+                    state.round_has_activity = True
                     for a in self.agents:
-                        self._inboxes[a.name].put_nowait(("system", text, round_number))
-                        agent_idle[a.name] = False
-                        agent_passed[a.name] = False
+                        state.agent_idle[a.name] = False
+                        state.agent_passed[a.name] = False
+                    self._enqueue_delivery(
+                        sender="system",
+                        message=text,
+                        round_number=state.round_number,
+                        recipients=[a.name for a in self.agents],
+                    )
                     _restart_dead_loops()
 
                 # Process DM restarts
@@ -667,19 +846,24 @@ class ChatRoom:
                     try:
                         name, dm_text = self._restart_queue.get_nowait()
                         if name in self._inboxes:
-                            if not round_open:
+                            if not state.round_open:
                                 self._any_stopped_this_round = False
                                 self._pause_on_stop = True
-                                round_open = True
+                                state.round_open = True
                                 yield RoundStarted(
-                                    round_number=round_number,
+                                    round_number=state.round_number,
                                     agents=[a.name for a in self.agents],
                                 )
-                            self._inboxes[name].put_nowait(("dm", dm_text, round_number))
-                            agent_idle[name] = False
-                            agent_passed[name] = False
-                            settlement_signaled = False
-                            round_has_activity = True
+                            state.agent_idle[name] = False
+                            state.agent_passed[name] = False
+                            state.settlement_signaled = False
+                            state.round_has_activity = True
+                            self._enqueue_delivery(
+                                sender="dm",
+                                message=dm_text,
+                                round_number=state.round_number,
+                                recipients=[name],
+                            )
                             _restart_dead_loops()
                     except asyncio.QueueEmpty:
                         break
@@ -690,9 +874,9 @@ class ChatRoom:
                         new_agent = self._add_agent_queue.get_nowait()
                         self.agents.append(new_agent)
                         self._inboxes[new_agent.name] = asyncio.Queue()
-                        agent_idle[new_agent.name] = False
-                        agent_passed[new_agent.name] = False
-                        agent_initialized[new_agent.name] = False
+                        state.agent_idle[new_agent.name] = False
+                        state.agent_passed[new_agent.name] = False
+                        state.agent_initialized[new_agent.name] = False
                         self._stop_events[new_agent.name] = asyncio.Event()
                         # Seed the new agent with the last user message so it has context
                         last_user_msg = None
@@ -701,20 +885,20 @@ class ChatRoom:
                                 last_user_msg = msg["content"]
                                 break
                         if last_user_msg:
-                            if not round_open:
+                            if not state.round_open:
                                 self._any_stopped_this_round = False
                                 self._pause_on_stop = True
-                                round_open = True
+                                state.round_open = True
                                 yield RoundStarted(
-                                    round_number=round_number,
+                                    round_number=state.round_number,
                                     agents=[a.name for a in self.agents],
                                 )
                             self._inboxes[new_agent.name].put_nowait(
-                                ("user", last_user_msg, round_number)
+                                ("user", last_user_msg, state.round_number, None)
                             )
-                            settlement_signaled = False
-                            round_has_activity = True
-                        agent_tasks[new_agent.name] = asyncio.create_task(
+                            state.settlement_signaled = False
+                            state.round_has_activity = True
+                        state.agent_tasks[new_agent.name] = asyncio.create_task(
                             agent_loop(new_agent), name=f"persistent-{new_agent.name}",
                         )
                     except asyncio.QueueEmpty:
@@ -726,31 +910,32 @@ class ChatRoom:
                         remove_name = self._remove_agent_queue.get_nowait()
                         self.agents = [a for a in self.agents if a.name != remove_name]
                         self._inboxes.pop(remove_name, None)
-                        agent_idle.pop(remove_name, None)
-                        agent_passed.pop(remove_name, None)
-                        agent_initialized.pop(remove_name, None)
+                        state.agent_idle.pop(remove_name, None)
+                        state.agent_passed.pop(remove_name, None)
+                        state.agent_initialized.pop(remove_name, None)
+                        self._drop_agent_pending_deliveries(remove_name)
                         stop_ev = self._stop_events.pop(remove_name, None)
                         if stop_ev:
                             stop_ev.set()
-                        task = agent_tasks.pop(remove_name, None)
+                        task = state.agent_tasks.pop(remove_name, None)
                         if task and not task.done():
                             task.cancel()
                     except asyncio.QueueEmpty:
                         break
 
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                    event = await asyncio.wait_for(state.event_queue.get(), timeout=0.1)
                 except asyncio.TimeoutError:
                     continue
 
                 if event is None:
                     # All agents settled — emit round end and check termination
-                    all_passed = all(agent_passed.values())
-                    yield RoundEnded(round_number=round_number, all_passed=all_passed)
+                    all_passed = all(state.agent_passed.values())
+                    yield RoundEnded(round_number=state.round_number, all_passed=all_passed)
                     if self._any_stopped_this_round and self._pause_on_stop:
                         self._any_stopped_this_round = False
                         self._resume_event.clear()
-                        yield RoundPaused(round_number=round_number)
+                        yield RoundPaused(round_number=state.round_number)
                         while (
                             not self._resume_event.is_set()
                             and self._user_queue.empty()
@@ -760,16 +945,22 @@ class ChatRoom:
                         ):
                             await asyncio.sleep(0.1)
                         self._resume_event.clear()
-                        settlement_signaled = False
+                        state.settlement_signaled = False
                         continue
+                    # Advance to the next round after every settled cycle. For non-consensus
+                    # settlements, immediately open the next round so pass-heavy idle states
+                    # don't strand the room on a stale round number.
+                    state.round_number += 1
+                    state.settlement_signaled = False
+                    state.round_has_activity = False
                     if all_passed:
-                        # Consensus reached: advance to next round and keep session alive.
-                        round_number += 1
-                        round_open = False
-                        settlement_signaled = False
-                        round_has_activity = False
+                        state.round_open = False
                     else:
-                        settlement_signaled = False
+                        state.round_open = True
+                        yield RoundStarted(
+                            round_number=state.round_number,
+                            agents=[a.name for a in self.agents],
+                        )
                     continue
 
                 yield event
@@ -778,13 +969,14 @@ class ChatRoom:
             log.info("persistent session cancelled")
             raise
         finally:
-            for task in agent_tasks.values():
+            for task in state.agent_tasks.values():
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(*agent_tasks.values(), return_exceptions=True)
+            await asyncio.gather(*state.agent_tasks.values(), return_exceptions=True)
             self._stop_events = {}
             self._inboxes = {}
             self._recent_relays = {}
+            self._delivery_pending = {}
 
     async def run(
         self, initial_prompt: str | None = None, start_round: int = 0,

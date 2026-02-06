@@ -63,6 +63,15 @@ class AgentPromptAssembled(ChatEvent):
 
 
 @dataclass
+class AgentDeliveryAcked(ChatEvent):
+    """Fired when an agent dequeues a delivered inbox message."""
+    delivery_id: str
+    recipient: str
+    sender: str
+    round_number: int | None
+
+
+@dataclass
 class RoundEnded(ChatEvent):
     round_number: int
     all_passed: bool

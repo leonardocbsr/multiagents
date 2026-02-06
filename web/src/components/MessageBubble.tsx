@@ -7,6 +7,7 @@ import StyledMarkdown from "./StyledMarkdown";
 import CoordinationBadges from "./CoordinationBadges";
 import { Button } from "./ui";
 import AgentMessageCard from "./AgentMessageCard";
+import { copyTextToClipboard } from "../utils/clipboard";
 
 interface Props {
   message: Message;
@@ -44,7 +45,8 @@ export default function MessageBubble({ message, agents, density = "comfortable"
   const handleCopy = useCallback(async () => {
     if (!canCopy) return;
     try {
-      await navigator.clipboard.writeText(message.content);
+      const ok = await copyTextToClipboard(message.content);
+      if (!ok) throw new Error("copy failed");
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {

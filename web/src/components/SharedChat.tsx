@@ -22,6 +22,20 @@ const STATUS_COLORS: Record<string, string> = {
   "IN PROGRESS": "badge-info",
 };
 const DEFAULT_STATUS_COLOR = "badge-info";
+const HANDOFF_RE_GLOBAL = /\[HANDOFF:(\w+)\]/gi;
+
+function extractHandoffs(text: string): string[] {
+  HANDOFF_RE_GLOBAL.lastIndex = 0;
+  const found: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = HANDOFF_RE_GLOBAL.exec(text)) !== null) {
+    const agent = match[1];
+    if (!found.some(h => h.toLowerCase() === agent.toLowerCase())) {
+      found.push(agent);
+    }
+  }
+  return found;
+}
 
 /** Strip thinking blocks so a <Share> accidentally opened inside one doesn't swallow everything. */
 function stripThinking(content: string): string {
@@ -55,8 +69,10 @@ function extractStatuses(text: string): string[] {
 
 function stripStatusTags(text: string): string {
   STATUS_TAG_RE_GLOBAL.lastIndex = 0;
+  HANDOFF_RE_GLOBAL.lastIndex = 0;
   return text
     .replace(STATUS_TAG_RE_GLOBAL, "")
+    .replace(HANDOFF_RE_GLOBAL, "")
     .replace(/[ \t]+$/gm, "")
     .replace(/^\n+/, "")
     .trim();
@@ -176,6 +192,12 @@ function formatTime(msg: Message): string {
     const d = new Date(msg.created_at);
     return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   } catch { return ""; }
+}
+
+function readByForMessage(state: AppState, msg: Message): string[] {
+  if (typeof msg.round_number !== "number") return [];
+  const key = `${msg.role}:${msg.round_number}`;
+  return state.deliveryAcks[key] ?? [];
 }
 
 export default function SharedChat({
@@ -356,8 +378,10 @@ export default function SharedChat({
             const aType = info.type;
             const shareContent = extractShareOnly(entry.message.content);
             const statuses = extractStatuses(shareContent);
+            const handoffs = extractHandoffs(shareContent);
             const markdownContent = stripStatusTags(shareContent);
             const time = formatTime(entry.message);
+            const readBy = readByForMessage(state, entry.message);
             const color = AGENT_COLORS[aType] ?? "text-ui-muted";
             const avatarClass = AGENT_AVATAR_CLASSES[aType] ?? "";
             const modelText = info.model ?? "unknown";
@@ -396,7 +420,7 @@ export default function SharedChat({
                       {markdownContent}
                     </StyledMarkdown>
                   </CardContent>
-                  {statuses.length > 0 && (
+                  {(statuses.length > 0 || handoffs.length > 0 || readBy.length > 0) && (
                     <CardFooter className="share-card-footer px-4 py-2 overflow-x-auto">
                       <div className="flex flex-nowrap gap-1.5 whitespace-nowrap pb-0.5">
                         {statuses.map((status, sIdx) => (
@@ -404,6 +428,33 @@ export default function SharedChat({
                             {status}
                           </span>
                         ))}
+                        {handoffs.map((agent, hIdx) => (
+                          <span key={`handoff-${hIdx}`} className="badge share-status-badge badge-violet shrink-0">
+                            → {agent}
+                          </span>
+                        ))}
+                        {readBy.length > 0 && (
+                          <span className="inline-flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] text-ui-subtle">read by</span>
+                            <span className="inline-flex items-center -space-x-1">
+                              {readBy.map((reader) => {
+                                const readerInfo = resolveAgentInfo(reader, state.agents);
+                                const readerType = readerInfo.type;
+                                const readerColor = AGENT_COLORS[readerType] ?? "text-ui-muted";
+                                const readerAvatar = AGENT_AVATAR_CLASSES[readerType] ?? "";
+                                return (
+                                  <span
+                                    key={`read-by-${entry.message!.id}-${reader}`}
+                                    className={`chat-avatar ${readerAvatar} ${readerColor} border-ui-soft w-4 h-4`}
+                                    title={reader}
+                                  >
+                                    <AgentIcon agent={readerType} size={9} />
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          </span>
+                        )}
                       </div>
                     </CardFooter>
                   )}
@@ -459,6 +510,7 @@ export default function SharedChat({
           const info = resolveAgentInfo(agent, state.agents);
           const aType = info.type;
           const statuses = extractStatuses(content);
+          const handoffs = extractHandoffs(content);
           const markdownContent = stripStatusTags(content);
           const color = AGENT_COLORS[aType] ?? "text-ui-muted";
           const avatarClass = AGENT_AVATAR_CLASSES[aType] ?? "";
@@ -493,12 +545,17 @@ export default function SharedChat({
                     {markdownContent}
                   </StyledMarkdown>
                 </CardContent>
-                {statuses.length > 0 && (
+                {(statuses.length > 0 || handoffs.length > 0) && (
                   <CardFooter className="share-card-footer px-4 py-2 overflow-x-auto">
                     <div className="flex flex-nowrap gap-1.5 whitespace-nowrap pb-0.5">
                       {statuses.map((status, sIdx) => (
                         <span key={`${status}-${sIdx}`} className={`badge share-status-badge shrink-0 ${STATUS_COLORS[status] || DEFAULT_STATUS_COLOR}`}>
                           {status}
+                        </span>
+                      ))}
+                      {handoffs.map((agent, hIdx) => (
+                        <span key={`handoff-${hIdx}`} className="badge share-status-badge badge-violet shrink-0">
+                          → {agent}
                         </span>
                       ))}
                     </div>

@@ -472,7 +472,7 @@ class SessionRunner:
 
     async def get_warmed_agents(self, session_id: str, agent_names: list[str] | list[dict]) -> list[BaseAgent]:
         """Get pre-warmed agents if available, otherwise create fresh ones."""
-        pool = self._agent_pools.get(session_id, {})
+        pool = self._agent_pools.setdefault(session_id, {})
         agents = []
         fallback_items = []
 
@@ -494,6 +494,9 @@ class SessionRunner:
                 cli_sid = agent_session_ids.get(agent.name)
                 if cli_sid:
                     agent.session_id = cli_sid
+                # Cache newly created agents so each session keeps one long-lived
+                # agent process per agent name across runs.
+                pool[agent.name] = agent
             agents.extend(fresh)
 
         return agents

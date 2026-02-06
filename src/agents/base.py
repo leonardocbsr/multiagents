@@ -158,7 +158,7 @@ class BaseAgent(ABC):
         self, prompt: str, timeout: float,
     ) -> AsyncGenerator[str | AgentResponse | AgentNotice | AgentPermissionRequest, None]:
         """Persistent-pipe streaming: delegates to PersistentAgent, translates events."""
-        from .protocols.base import TextDelta, ThinkingDelta, ToolBadge, ToolOutput, ToolResult, TurnComplete
+        from .protocols.base import ProcessRestarted, TextDelta, ThinkingDelta, ToolBadge, ToolOutput, ToolResult, TurnComplete
         from .protocols.base import PermissionRequest as ProtoPermReq
 
         pa = self._ensure_persistent()
@@ -187,6 +187,11 @@ class BaseAgent(ABC):
                         detail = event.output[:200] if event.output else ""
                         body = f"{label} {detail}".strip() if detail else label
                         yield f"<{tag}>{body}</{tag}>\n"
+                    elif isinstance(event, ProcessRestarted):
+                        yield AgentNotice(
+                            agent=self.name,
+                            message=f"persistent process restarted (retry {event.retry})",
+                        )
                     elif isinstance(event, ProtoPermReq):
                         yield AgentPermissionRequest(
                             agent=self.name,

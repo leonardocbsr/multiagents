@@ -20,6 +20,7 @@ const INITIAL_STATE: AppState = {
   isPaused: false,
   currentRound: 0,
   cards: [],
+  deliveryAcks: {},
   agentPrompts: {},
   pendingPermissions: [],
 };
@@ -98,6 +99,7 @@ function reducer(state: AppState, action: Action): AppState {
         agentStatuses: {},
         pendingAgentStderr: {},
         cards: [],
+        deliveryAcks: {},
         agentPrompts: {},
         pendingPermissions: [],
         reconnecting: false,
@@ -121,6 +123,7 @@ function reducer(state: AppState, action: Action): AppState {
           pendingAgentStderr: {},
           pendingPermissions: [],
           cards: msg.cards ?? [],
+          deliveryAcks: {},
           agentPrompts: {},
           reconnecting: false,
           reconnectAttempt: 0,
@@ -141,6 +144,7 @@ function reducer(state: AppState, action: Action): AppState {
         pendingAgentStderr: {},
         pendingPermissions: [],
         cards: msg.cards ?? [],
+        deliveryAcks: {},
         agentPrompts: {},
         reconnecting: false,
         reconnectAttempt: 0,
@@ -175,6 +179,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         agentStreams: { ...state.agentStreams, [msg.agent]: (state.agentStreams[msg.agent] ?? "") + msg.chunk },
         agentStreamCounts: { ...state.agentStreamCounts, [msg.agent]: (state.agentStreamCounts[msg.agent] ?? 0) + 1 },
+        ...(state.agentStatuses[msg.agent] !== "streaming" ? { agentStatuses: { ...state.agentStatuses, [msg.agent]: "streaming" } } : {}),
       };
 
     case "agent_stderr": {
@@ -293,6 +298,20 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
 
+    case "delivery_acked": {
+      if (typeof msg.round !== "number") return state;
+      const key = `${msg.sender}:${msg.round}`;
+      const existing = state.deliveryAcks[key] ?? [];
+      if (existing.includes(msg.recipient)) return state;
+      return {
+        ...state,
+        deliveryAcks: {
+          ...state.deliveryAcks,
+          [key]: [...existing, msg.recipient],
+        },
+      };
+    }
+
     case "permission_request":
       if (state.pendingPermissions.some((p) => p.request_id === msg.request_id && p.agent === msg.agent)) {
         return state;
@@ -325,12 +344,18 @@ function reducer(state: AppState, action: Action): AppState {
       const { [msg.name]: _stream, ...restStreams } = state.agentStreams;
       const { [msg.name]: _status, ...restStatuses } = state.agentStatuses;
       const { [msg.name]: _count, ...restCounts } = state.agentStreamCounts;
+      const nextAcks: Record<string, string[]> = {};
+      for (const [k, readers] of Object.entries(state.deliveryAcks)) {
+        const filtered = readers.filter((name) => name !== msg.name);
+        if (filtered.length > 0) nextAcks[k] = filtered;
+      }
       return {
         ...state,
         agents: state.agents.filter(a => a.name !== msg.name),
         agentStreams: restStreams,
         agentStatuses: restStatuses,
         agentStreamCounts: restCounts,
+        deliveryAcks: nextAcks,
       };
     }
 

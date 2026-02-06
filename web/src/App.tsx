@@ -13,6 +13,7 @@ import PermissionBanner from "./components/PermissionBanner";
 import { ChevronDown, Copy, FileText, ListTodo, Pin, Settings, X } from "lucide-react";
 import { applyThemeAttributes, normalizeThemeConfig, type ThemeConfig } from "./theme/applyTheme";
 import { Button } from "./components/ui";
+import { copyTextToClipboard } from "./utils/clipboard";
 
 function getHashSessionId(): string | null {
   const hash = window.location.hash.slice(1);
@@ -123,10 +124,9 @@ export default function App() {
       window.location.hash = state.sessionId;
       if (prevSessionRef.current !== state.sessionId) {
         prevSessionRef.current = state.sessionId;
-        navigator.clipboard.writeText(window.location.href).then(
-          () => toast("Session URL copied to clipboard", "info"),
-          () => {} // clipboard not available, skip silently
-        );
+        void copyTextToClipboard(window.location.href).then((ok) => {
+          if (ok) toast("Session URL copied to clipboard", "info");
+        });
       }
     }
   }, [state.sessionId, toast]);
@@ -143,10 +143,10 @@ export default function App() {
 
   const handleCopySessionId = useCallback(() => {
     if (!state.sessionId) return;
-    navigator.clipboard.writeText(state.sessionId).then(
-      () => toast("Session ID copied", "info"),
-      () => toast("Failed to copy session ID", "error")
-    );
+    void copyTextToClipboard(state.sessionId).then((ok) => {
+      if (ok) toast("Session ID copied", "info");
+      else toast("Failed to copy session ID", "error");
+    });
   }, [state.sessionId, toast]);
 
   const loadRecentSessions = useCallback(() => {
@@ -316,7 +316,7 @@ export default function App() {
       if (!compact) continue;
       return compact.length > 64 ? `${compact.slice(0, 63)}…` : compact;
     }
-    return "New task for you guys, need to check git history…";
+    return null;
   }, [state.messages]);
 
   if (showPicker || !state.sessionId) {
@@ -444,9 +444,11 @@ export default function App() {
           </div>
           <div className="w-px h-5 border-l border-ui-soft shrink-0 hidden sm:block" />
 
-          <span className="text-[13px] text-ui-muted font-medium min-w-0 truncate hidden md:block">
-            {latestUserSummary}
-          </span>
+          {latestUserSummary && (
+            <span className="text-[13px] text-ui-muted font-medium min-w-0 truncate hidden md:block">
+              {latestUserSummary}
+            </span>
+          )}
 
           {/* Right: controls */}
           <div className="flex items-center gap-2 text-xs text-ui-subtle shrink-0 ml-auto min-w-0">

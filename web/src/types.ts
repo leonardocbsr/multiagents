@@ -97,6 +97,7 @@ export interface AppState {
   isPaused: boolean;
   currentRound: number;
   cards: Card[];
+  deliveryAcks: Record<string, string[]>;
   agentPrompts: Record<string, Record<number, Record<string, string>>>;
   pendingPermissions: Array<{
     request_id: string;
@@ -142,6 +143,7 @@ export type ServerMessage = ServerEnvelope & (
   | { type: "agent_interrupted"; agent: string; round: number; partial_text: string; created_at?: string }
   | { type: "dm_sent"; agent: string; text: string; round: number; created_at?: string }
   | { type: "agent_prompt"; agent: string; round: number; sections: Record<string, string> }
+  | { type: "delivery_acked"; delivery_id: string; recipient: string; sender: string; round?: number; created_at?: string }
   | { type: "permission_request"; agent: string; round: number; request_id: string; tool_name: string; tool_input: Record<string, unknown>; description: string; created_at?: string }
 );
 

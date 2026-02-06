@@ -2,8 +2,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from src.agents.base import AgentResponse, BaseAgent
-from src.agents.protocols.base import TextDelta, TurnComplete
+from src.agents.base import AgentNotice, AgentResponse, BaseAgent
+from src.agents.protocols.base import ProcessRestarted, TextDelta, TurnComplete
 
 
 class _StubPersistent:
@@ -68,3 +68,23 @@ async def test_base_agent_uses_turn_error_when_no_text() -> None:
     response = next(i for i in items if isinstance(i, AgentResponse))
     assert response.success is False
     assert response.response == "upstream error"
+
+
+@pytest.mark.asyncio
+async def test_base_agent_emits_notice_when_persistent_process_restarts() -> None:
+    agent = _DummyAgent(
+        _StubPersistent(
+            [
+                ProcessRestarted(reason="broken pipe", retry=1),
+                TurnComplete(session_id="sid-1", success=True),
+            ]
+        )
+    )
+
+    items = []
+    async for item in agent.stream("hello"):
+        items.append(item)
+
+    notice = next(i for i in items if isinstance(i, AgentNotice))
+    assert "persistent process restarted" in notice.message
+    assert "retry 1" in notice.message

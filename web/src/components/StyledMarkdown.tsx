@@ -169,6 +169,7 @@ const STATUS_COLORS: Record<string, string> = {
 const DEFAULT_STATUS_COLOR = "badge-info";
 
 const STATUS_TAG_RE_GLOBAL = /(?:\[(EXPLORE|DECISION|BLOCKED|DONE|TODO|QUESTION)\]|\[STATUS:\s*([^\]\n]+)\])/gi;
+const HANDOFF_RE_GLOBAL = /\[HANDOFF:(\w+)\]/gi;
 
 function normalizeStatus(status: string): string {
   return status.trim().replace(/\s+/g, " ").toUpperCase();
@@ -184,9 +185,25 @@ function extractStatuses(text: string): string[] {
   return found;
 }
 
+function extractHandoffs(text: string): string[] {
+  HANDOFF_RE_GLOBAL.lastIndex = 0;
+  const found: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = HANDOFF_RE_GLOBAL.exec(text)) !== null) {
+    const agent = match[1];
+    if (!found.some(h => h.toLowerCase() === agent.toLowerCase())) {
+      found.push(agent);
+    }
+  }
+  return found;
+}
+
 function stripStatusTags(text: string): string {
+  STATUS_TAG_RE_GLOBAL.lastIndex = 0;
+  HANDOFF_RE_GLOBAL.lastIndex = 0;
   return text
     .replace(STATUS_TAG_RE_GLOBAL, "")
+    .replace(HANDOFF_RE_GLOBAL, "")
     .replace(/[ \t]+$/gm, "")
     .replace(/^\n+/, "")
     .trim();
@@ -195,6 +212,7 @@ function stripStatusTags(text: string): string {
 /** Process Share block content to highlight coordination patterns */
 function ShareBlock({ content, header }: { content: string; header?: string | null }) {
   const statuses = extractStatuses(content);
+  const handoffs = extractHandoffs(content);
   const markdownContent = stripStatusTags(content);
   const showHeader = header !== null && header !== "";
 
@@ -217,12 +235,17 @@ function ShareBlock({ content, header }: { content: string; header?: string | nu
           </Markdown>
         )}
       </CardContent>
-      {statuses.length > 0 && (
+      {(statuses.length > 0 || handoffs.length > 0) && (
         <CardFooter className="share-card-footer px-3 py-2 overflow-x-auto">
           <div className="flex flex-nowrap gap-1.5 whitespace-nowrap pb-0.5">
             {statuses.map((status, i) => (
               <span key={`${status}-${i}`} className={`badge share-status-badge shrink-0 ${STATUS_COLORS[status] || DEFAULT_STATUS_COLOR}`}>
                 {status}
+              </span>
+            ))}
+            {handoffs.map((agent, i) => (
+              <span key={`handoff-${i}`} className="badge share-status-badge badge-violet shrink-0">
+                → {agent}
               </span>
             ))}
           </div>

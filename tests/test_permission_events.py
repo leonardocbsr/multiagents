@@ -16,7 +16,7 @@ import pytest
 
 from src.agents.protocols.base import PermissionRequest, PermissionResponse
 from src.agents.base import AgentPermissionRequest, AgentResponse
-from src.chat.events import AgentPermissionRequested
+from src.chat.events import AgentDeliveryAcked, AgentPermissionRequested
 from src.chat.room import ChatRoom
 from src.server.protocol import event_to_dict
 from src.server.settings import DEFAULTS
@@ -102,6 +102,22 @@ def test_event_to_dict_permission_requested():
     assert d["tool_name"] == "Write"
     assert d["tool_input"] == {"file_path": "/tmp/test.txt"}
     assert d["description"] == "Claude wants to use Write"
+    assert "created_at" in d
+
+
+def test_event_to_dict_delivery_acked():
+    event = AgentDeliveryAcked(
+        delivery_id="d42",
+        recipient="codex",
+        sender="claude",
+        round_number=3,
+    )
+    d = event_to_dict(event)
+    assert d["type"] == "delivery_acked"
+    assert d["delivery_id"] == "d42"
+    assert d["recipient"] == "codex"
+    assert d["sender"] == "claude"
+    assert d["round"] == 3
     assert "created_at" in d
 
 

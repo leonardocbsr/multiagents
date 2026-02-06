@@ -121,62 +121,20 @@ def format_cards_section(cards: list[dict], agent_name: str) -> str:
 
     lines = [
         "## Task Board",
-        "You can manage cards via the `multiagents-cards` CLI "
-        "(list, get, create, update, delete, my-cards). "
+        "Manage cards via `multiagents-cards` CLI. "
         "Session and URL are pre-configured in your environment.",
     ]
-    own_cards: list[str] = []
-    other_cards: list[str] = []
-    coordinators: set[str] = set()
 
     for c in cards:
-        roles: list[str] = []
-        is_mine = False
-        coordinator = c.get("coordinator", "")
-        if coordinator:
-            coordinators.add(coordinator)
+        my_roles: list[str] = []
         for role in ("coordinator", "planner", "implementer", "reviewer"):
             assignee = c.get(role, "")
-            if assignee:
-                tag = f"{role}={assignee}"
-                if assignee.lower() == agent_name.lower():
-                    tag += " (you)"
-                    is_mine = True
-                roles.append(tag)
-        role_str = ", ".join(roles) if roles else "unassigned"
-        desc = c.get("description", "")
-        desc_snippet = (desc[:80] + "...") if len(desc) > 80 else desc
-        entry = f"- [{c['id']}] \"{c['title']}\" ({c['status']}) — {role_str}"
-        if desc_snippet:
-            entry += f"\n  {desc_snippet}"
-        if is_mine:
-            own_cards.append(entry)
-        else:
-            other_cards.append(entry)
-
-    if own_cards:
-        lines.append("Your cards:")
-        lines.extend(own_cards)
-    if other_cards:
-        lines.append("Other cards:")
-        lines.extend(other_cards)
-
-    # Add coordinator deference instructions
-    if coordinators:
-        active_coordinators = ", ".join(f"@{c}" for c in sorted(coordinators))
-        is_coordinator = agent_name.lower() in {c.lower() for c in coordinators}
-        if is_coordinator:
-            lines.append(
-                f"\nYou are a COORDINATOR (tech lead). You set the technical direction "
-                "for your cards. Other agents must follow your approach. "
-                "If an agent deviates, redirect them."
-            )
-        else:
-            lines.append(
-                f"\nCOORDINATOR AUTHORITY: {active_coordinators} "
-                "is the tech lead for assigned cards. Defer to their technical decisions. "
-                "If you disagree, raise it with them — do not override their direction."
-            )
+            if assignee and assignee.lower() == agent_name.lower():
+                my_roles.append(role)
+        entry = f"- [{c['id']}] \"{c['title']}\" ({c['status']})"
+        if my_roles:
+            entry += f" — your role: {', '.join(my_roles)}"
+        lines.append(entry)
 
     return "\n".join(lines)
 

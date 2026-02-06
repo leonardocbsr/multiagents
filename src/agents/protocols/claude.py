@@ -19,7 +19,7 @@ import json
 import logging
 from typing import AsyncIterator
 
-from .base import AgentEvent, PermissionRequest, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, TurnComplete
+from .base import AgentEvent, PermissionRequest, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, ToolResult, TurnComplete
 from ..base import _extract_tool_detail
 
 log = logging.getLogger("multiagents")
@@ -76,6 +76,7 @@ class ClaudeProtocol(ProtocolAdapter):
                 subtype = obj.get("subtype", "")
                 if subtype == "compact_boundary":
                     log.info("[claude-proto] context compaction boundary")
+                    yield ToolBadge(label="Compacting", detail="")
                 else:
                     log.debug("[claude-proto] system event subtype=%s", subtype)
                 continue
@@ -165,7 +166,7 @@ class ClaudeProtocol(ProtocolAdapter):
                         yield ToolBadge(label=st.get("name", st_type), detail="")
                 self._seen_server_tools = len(server_tools)
 
-                # Tool results — emit badges for completed tool calls
+                # Tool results — yield ToolResult for completed tool calls
                 tool_results = [p for p in content if p.get("type") in {
                     "tool_result", "server_tool_result", "web_search_tool_result",
                     "code_execution_tool_result", "mcp_tool_result",
@@ -173,8 +174,18 @@ class ClaudeProtocol(ProtocolAdapter):
                 for tr in tool_results[self._seen_results:]:
                     tr_type = tr.get("type", "")
                     is_err = tr.get("is_error", False)
-                    if is_err:
-                        log.debug("[claude-proto] tool result error type=%s", tr_type)
+                    tool_name = tr_type.replace("_result", "")
+                    tr_content = ""
+                    raw = tr.get("content")
+                    if isinstance(raw, str):
+                        tr_content = raw[:300]
+                    elif isinstance(raw, list):
+                        tr_content = " ".join(
+                            p.get("text", "")[:100]
+                            for p in raw
+                            if isinstance(p, dict) and p.get("type") == "text"
+                        )[:300]
+                    yield ToolResult(tool_name=tool_name, success=not is_err, output=tr_content)
                 self._seen_results = len(tool_results)
 
                 # Text deltas (cumulative)

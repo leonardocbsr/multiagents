@@ -16,6 +16,7 @@ const TAG_STYLES: Record<string, { border: string; bg: string; text: string; pil
   tool_result:     { border: "border-amber-500/20",   bg: "bg-amber-500/5",   text: "text-amber-400/70",   pill: "text-amber-400",   pillBg: "bg-amber-500/15" },
   search_results:  { border: "border-blue-500/20",    bg: "bg-blue-500/5",    text: "text-blue-400/70",    pill: "text-blue-400",    pillBg: "bg-blue-500/15" },
   artifact:        { border: "border-indigo-500/20",  bg: "bg-indigo-500/5",  text: "text-indigo-400/70",  pill: "text-indigo-400",  pillBg: "bg-indigo-500/15" },
+  tool_output:     { border: "border-zinc-600/20",    bg: "bg-zinc-500/5",    text: "text-zinc-500/70",    pill: "text-zinc-500",    pillBg: "bg-zinc-600/15" },
   "system-reminder":{ border: "border-cyan-500/20",   bg: "bg-cyan-500/5",    text: "text-cyan-400/70",    pill: "text-cyan-400",    pillBg: "bg-cyan-500/15" },
 };
 
@@ -126,6 +127,28 @@ function ThinkingBlock({ content }: { content: string }) {
       </summary>
       <div className="thinking-expanded mt-1 ml-1 border-l-2 border-purple-500/15 pl-2.5 text-[11px] text-purple-300/40 break-words leading-relaxed">
         <Markdown remarkPlugins={remarkPlugins} components={mdComponents}>{trimmed}</Markdown>
+      </div>
+    </details>
+  );
+}
+
+/** Collapsible monospace block for tool output (collapsed by default) */
+function ToolOutputBlock({ content }: { content: string }) {
+  const trimmed = content.trim();
+  const lines = trimmed.split("\n");
+  const preview = lines[0]?.slice(0, 120) ?? "";
+  const hasMore = lines.length > 1 || trimmed.length > 120;
+
+  return (
+    <details className="my-0.5 group">
+      <summary className="flex items-center gap-1.5 cursor-pointer text-[11px] text-zinc-500/60 hover:text-zinc-400/80 transition-colors select-none list-none">
+        <span className="inline-flex items-center font-medium bg-zinc-600/10 border border-zinc-600/20 px-1.5 py-0.5 rounded-md font-mono shrink-0">
+          Output
+        </span>
+        <span className="text-zinc-600 font-mono truncate">{preview}{hasMore ? " ..." : ""}</span>
+      </summary>
+      <div className="mt-1 ml-1 border-l-2 border-zinc-600/15 pl-2.5 text-[11px] text-zinc-500/50 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-64 overflow-y-auto">
+        {trimmed}
       </div>
     </details>
   );
@@ -278,6 +301,7 @@ function liftShareFromThinking(segments: Segment[]): Segment[] {
 
 function TagBlock({ tag, content, shareHeader }: { tag: string; content: string; shareHeader?: string | null }) {
   if (tag === "tool") return <ToolBadge content={content} />;
+  if (tag === "tool_output") return <ToolOutputBlock content={content} />;
   if (tag === "thinking" || tag === "antThinking") return <ThinkingBlock content={content} />;
   // Share tags indicate content shared with other agents - style distinctly
   if (tag.toLowerCase() === "share") {

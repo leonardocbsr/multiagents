@@ -197,8 +197,10 @@ def test_kimi_protocol_receives_permission_mode():
     from src.agents.kimi import KimiAgent
     agent = KimiAgent()
     agent.permission_mode = "manual"
+    agent.permission_timeout = 42
     proto = agent._get_protocol()
     assert proto._permission_mode == "manual"
+    assert proto._permission_timeout == 42
 
 
 # ── Kimi protocol Future-based approval ──────────────────────────────────
@@ -355,3 +357,21 @@ def test_apply_config_sets_permission_mode():
 
     assert agent_c.permission_mode == "manual"
     assert agent_x.permission_mode == "auto"
+
+
+def test_apply_config_sets_permission_timeout():
+    """Test that _apply_config_to_agents applies permissions.timeout to agents."""
+    import tempfile
+    from pathlib import Path
+
+    from src.agents.kimi import KimiAgent
+    from src.server.runner import SessionRunner
+    from src.server.sessions import SessionStore
+
+    db_path = Path(tempfile.mkdtemp()) / "test.db"
+    runner = SessionRunner(store=SessionStore(db_path))
+    agent = KimiAgent()
+    assert agent.permission_timeout == 120.0
+
+    runner._apply_config_to_agents([agent], {"permissions.timeout": 15})
+    assert agent.permission_timeout == 15.0

@@ -32,11 +32,12 @@ class KimiProtocol(ProtocolAdapter):
 
     _session_id: str | None = None
 
-    def __init__(self, permission_mode: str = "bypass") -> None:
+    def __init__(self, permission_mode: str = "bypass", permission_timeout: float = 120.0) -> None:
         self._id_counter = 0
         self._last_prompt_id: str | None = None
         self._initialized = False
         self._permission_mode = permission_mode
+        self._permission_timeout = permission_timeout
         self._pending_permissions: dict[str, asyncio.Future] = {}
 
     async def respond_to_permission(self, response: PermissionResponse) -> None:
@@ -179,7 +180,10 @@ class KimiProtocol(ProtocolAdapter):
                                 description=payload.get("description", ""),
                             )
                             try:
-                                perm_response = await asyncio.wait_for(future, timeout=120.0)
+                                if self._permission_timeout > 0:
+                                    perm_response = await asyncio.wait_for(future, timeout=self._permission_timeout)
+                                else:
+                                    perm_response = await future
                                 decision = "approve" if perm_response.approved else "reject"
                             except asyncio.TimeoutError:
                                 decision = "reject"  # fail-closed: deny on timeout

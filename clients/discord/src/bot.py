@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import discord
+from discord import ChannelType
 
 from .allowlist import is_allowed
 from .bridge import Bridge, ConnectionLost
@@ -17,13 +19,10 @@ MAX_RECONNECT_ATTEMPTS = 3
 BASE_RECONNECT_DELAY = 1  # seconds
 MAX_RECONNECT_DELAY = 30  # seconds
 
-_THREAD_CHANNEL_TYPES = tuple(
-    t for t in (
-        getattr(discord.ChannelType, "public_thread", None),
-        getattr(discord.ChannelType, "private_thread", None),
-        getattr(discord.ChannelType, "news_thread", None),
-    )
-    if t is not None
+_THREAD_CHANNEL_TYPES = (
+    ChannelType.public_thread,
+    ChannelType.private_thread,
+    ChannelType.news_thread,
 )
 
 
@@ -70,8 +69,13 @@ class MultiAgentsBot(discord.Client):
         return message.content.strip().lower() == "!stop"
 
     def thread_name(self, prompt: str) -> str:
-        """Generate a non-sensitive thread name."""
-        return "multiagents-session"
+        """Generate a non-sensitive, distinguishable thread name.
+
+        Uses a timestamp-based naming scheme to avoid leaking user prompt content
+        while keeping thread names unique and identifiable.
+        """
+        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        return f"Session {timestamp}"
 
     def _strip_bot_mention(self, text: str) -> str:
         """Remove bot mention tokens from a message body."""

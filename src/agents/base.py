@@ -90,6 +90,7 @@ class BaseAgent(ABC):
     _work_dir: str | None = None
     parse_timeout: float = 1200.0
     hard_timeout: float | None = None
+    permission_timeout: float = 120.0
     extra_env: dict[str, str] | None = None
     _persistent: "PersistentAgent | None" = None
 

@@ -769,6 +769,10 @@ class SessionRunner:
 
     def _apply_config_to_agents(self, agents: list, config: dict) -> None:
         """Apply model, timeout, and permission settings from config to agents."""
+        perm_timeout = config.get("permissions.timeout")
+        permission_timeout: float | None = None
+        if isinstance(perm_timeout, (int, float)) and perm_timeout >= 0:
+            permission_timeout = float(perm_timeout)
         for agent in agents:
             agent_type = agent.agent_type or agent.name
             if not agent.model:
@@ -784,6 +788,8 @@ class SessionRunner:
             perm_mode = config.get(f"agents.{agent_type}.permissions", "bypass")
             if hasattr(agent, "permission_mode"):
                 agent.permission_mode = perm_mode
+            if permission_timeout is not None and hasattr(agent, "permission_timeout"):
+                agent.permission_timeout = permission_timeout
             parse_t = config.get("timeouts.parse")
             if isinstance(parse_t, (int, float)):
                 agent.parse_timeout = float(parse_t)

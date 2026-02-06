@@ -111,10 +111,22 @@ def test_is_stop_command(bot):
 
 
 def test_thread_name_from_prompt(bot):
+    """Thread names should not leak prompt content and should be distinguishable."""
     long_prompt = "Discuss the API design for authentication and authorization"
-    assert bot.thread_name(long_prompt) == "multiagents-session"
-    assert bot.thread_name("Short") == "multiagents-session"
-    assert "Discuss" not in bot.thread_name(long_prompt)
+    name = bot.thread_name(long_prompt)
+
+    # Should not contain any prompt text (sanitization)
+    assert "Discuss" not in name
+    assert "API" not in name
+    assert "authentication" not in name
+
+    # Should follow the Session {timestamp} format
+    assert name.startswith("Session ")
+
+    # Should be deterministic for same prompt (timestamp-based)
+    name2 = bot.thread_name(long_prompt)
+    # Names may differ due to timestamp, but format should be consistent
+    assert name2.startswith("Session ")
 
 
 async def test_stop_command_no_session(bot):
@@ -126,17 +138,34 @@ async def test_stop_command_no_session(bot):
     msg.channel.send.assert_not_called()
 
 
-async def test_active_thread_message_requires_mention(bot):
+async def test_active_thread_non_owner_non_mention_blocked(bot):
+    """Messages from non-owner without @mention are blocked."""
     thread_id = 55555
-    msg = _make_message("hello without mention", thread_id=thread_id, mentions_bot=False)
+    # User 222 is not the owner (owner is 111)
+    msg = _make_message("hello without mention", author_id=222, thread_id=thread_id, mentions_bot=False)
 
     fake_bridge = AsyncMock()
     bot._bridges[thread_id] = fake_bridge
-    bot._thread_participants[thread_id] = {111}
+    bot._thread_participants[thread_id] = {111}  # Owner is user 111
 
     await bot.on_message(msg)
 
     fake_bridge.send_message.assert_not_called()
+
+
+async def test_active_thread_owner_message_forwarded_without_mention(bot):
+    """Messages from thread owner (without @mention) are forwarded."""
+    thread_id = 55555
+    # User 111 is the owner
+    msg = _make_message("hello from owner", author_id=111, thread_id=thread_id, mentions_bot=False)
+
+    fake_bridge = AsyncMock()
+    bot._bridges[thread_id] = fake_bridge
+    bot._thread_participants[thread_id] = {111}  # Owner is user 111
+
+    await bot.on_message(msg)
+
+    fake_bridge.send_message.assert_called_once_with("hello from owner")
 
 
 async def test_active_thread_message_with_mention_forwards_stripped_prompt(bot):

@@ -84,4 +84,7 @@ class KimiAgent(BaseAgent):
         return args
 
     def _get_protocol(self) -> KimiProtocol:
-        return KimiProtocol(permission_mode=self.permission_mode)
+        return KimiProtocol(
+            permission_mode=self.permission_mode,
+            permission_timeout=self.permission_timeout,
+        )

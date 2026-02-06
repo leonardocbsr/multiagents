@@ -209,3 +209,18 @@ def test_error_event_default_message():
     messages = format_event(event)
     assert len(messages) == 1
     assert "Unknown error" in messages[0]
+
+
+def test_permission_request_event():
+    event = {
+        "type": "permission_request",
+        "agent": "kimi",
+        "tool_name": "Bash",
+        "description": "Run tests",
+    }
+    messages = format_event(event)
+    assert len(messages) == 1
+    assert "Permission requested" in messages[0]
+    assert "Kimi" in messages[0]
+    assert "Bash" in messages[0]
+    assert "Run tests" in messages[0]

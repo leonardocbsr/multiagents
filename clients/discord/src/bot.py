@@ -17,6 +17,15 @@ MAX_RECONNECT_ATTEMPTS = 3
 BASE_RECONNECT_DELAY = 1  # seconds
 MAX_RECONNECT_DELAY = 30  # seconds
 
+_THREAD_CHANNEL_TYPES = tuple(
+    t for t in (
+        getattr(discord.ChannelType, "public_thread", None),
+        getattr(discord.ChannelType, "private_thread", None),
+        getattr(discord.ChannelType, "news_thread", None),
+    )
+    if t is not None
+)
+
 
 class MultiAgentsBot(discord.Client):
     """Discord bot that bridges to the multiagents platform."""
@@ -54,17 +63,23 @@ class MultiAgentsBot(discord.Client):
 
     def is_thread_message(self, message: discord.Message) -> bool:
         """Check if this message is inside a thread."""
-        return hasattr(message.channel, "type") and "thread" in str(message.channel.type)
+        return getattr(message.channel, "type", None) in _THREAD_CHANNEL_TYPES
 
     def is_stop_command(self, message: discord.Message) -> bool:
         """Check if this is a !stop command."""
         return message.content.strip().lower() == "!stop"
 
     def thread_name(self, prompt: str) -> str:
-        """Generate a thread name from the prompt (max 50 chars)."""
-        if len(prompt) <= 50:
-            return prompt
-        return prompt[:49] + "…"
+        """Generate a non-sensitive thread name."""
+        return "multiagents-session"
+
+    def _strip_bot_mention(self, text: str) -> str:
+        """Remove bot mention tokens from a message body."""
+        if not self.user:
+            return text.strip()
+        text = text.replace(f"<@{self.user.id}>", "")
+        text = text.replace(f"<@!{self.user.id}>", "")
+        return text.strip()
 
     async def on_ready(self):
         log.info("Bot ready as %s", self.user)
@@ -81,23 +96,23 @@ class MultiAgentsBot(discord.Client):
 
         # Message in an active thread → forward to session
         if self.is_thread_message(message) and message.channel.id in self._bridges:
-            # Enforce per-thread participant check
-            participants = self._thread_participants.get(message.channel.id)
-            if participants is not None and message.author.id not in participants:
-                log.info("User %s not a participant of thread %s, ignoring", message.author.id, message.channel.id)
+            # After session starts, only forward messages that @mention the bot
+            # OR are from the thread owner (creator)
+            is_owner = message.author.id in self._thread_participants.get(message.channel.id, set())
+            if not self.is_mention(message) and not is_owner:
                 return
             bridge = self._bridges[message.channel.id]
-            await bridge.send_message(message.content)
+            prompt = self._strip_bot_mention(message.content)
+            if not prompt:
+                return
+            await bridge.send_message(prompt)
             self._reset_inactivity_timer(message.channel)
             return
 
         # @mention in a channel → create new thread + session
         if self.is_mention(message):
             # Strip the bot mention from the prompt
-            prompt = message.content
-            if self.user:
-                prompt = prompt.replace(f"<@{self.user.id}>", "").strip()
-                prompt = prompt.replace(f"<@!{self.user.id}>", "").strip()
+            prompt = self._strip_bot_mention(message.content)
 
             if not prompt:
                 prompt = "Start a discussion"

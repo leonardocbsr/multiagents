@@ -76,6 +76,8 @@ def format_event(event: dict) -> list[str]:
         return _format_agent_interrupted(event)
     elif event_type == "discussion_ended":
         return _format_discussion_ended(event)
+    elif event_type == "permission_request":
+        return _format_permission_request(event)
     elif event_type == "error":
         return _format_error(event)
     else:
@@ -146,6 +148,17 @@ def _format_discussion_ended(event: dict) -> list[str]:
     elif reason == "error":
         return ["Discussion ended due to an error."]
     return [f"Discussion ended ({reason})."]
+
+
+def _format_permission_request(event: dict) -> list[str]:
+    agent = str(event.get("agent", "unknown")).capitalize()
+    tool_name = str(event.get("tool_name", "unknown"))
+    description = str(event.get("description", "")).strip()
+
+    message = f"🔐 **Permission requested** by **{agent}** for `{tool_name}`."
+    if description:
+        message += f"\n{description}"
+    return [message]
 
 
 def _format_error(event: dict) -> list[str]:

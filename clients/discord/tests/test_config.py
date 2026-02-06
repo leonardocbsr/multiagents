@@ -54,3 +54,36 @@ def test_config_missing_allowlist_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="DISCORD_ALLOWLIST"):
         Config.from_env()
+
+
+def test_config_invalid_inactivity_timeout_non_integer(monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "tok")
+    monkeypatch.setenv("DISCORD_ALLOWLIST", "111")
+    monkeypatch.setenv("INACTIVITY_TIMEOUT", "abc")
+
+    from src.config import Config
+
+    with pytest.raises(ValueError, match="INACTIVITY_TIMEOUT must be an integer"):
+        Config.from_env()
+
+
+def test_config_invalid_inactivity_timeout_zero(monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "tok")
+    monkeypatch.setenv("DISCORD_ALLOWLIST", "111")
+    monkeypatch.setenv("INACTIVITY_TIMEOUT", "0")
+
+    from src.config import Config
+
+    with pytest.raises(ValueError, match="INACTIVITY_TIMEOUT must be greater than 0"):
+        Config.from_env()
+
+
+def test_config_invalid_inactivity_timeout_negative(monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "tok")
+    monkeypatch.setenv("DISCORD_ALLOWLIST", "111")
+    monkeypatch.setenv("INACTIVITY_TIMEOUT", "-100")
+
+    from src.config import Config
+
+    with pytest.raises(ValueError, match="INACTIVITY_TIMEOUT must be greater than 0"):
+        Config.from_env()

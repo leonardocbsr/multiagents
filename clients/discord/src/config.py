@@ -27,7 +27,13 @@ class Config:
         server_url = os.environ.get("SERVER_URL", "ws://localhost:8421/ws").strip()
         agents_str = os.environ.get("DEFAULT_AGENTS", "claude,codex,kimi").strip()
         default_agents = [a.strip() for a in agents_str.split(",") if a.strip()]
-        inactivity_timeout = int(os.environ.get("INACTIVITY_TIMEOUT", "1800"))
+        raw_timeout = os.environ.get("INACTIVITY_TIMEOUT", "1800").strip()
+        try:
+            inactivity_timeout = int(raw_timeout)
+        except ValueError as exc:
+            raise ValueError("INACTIVITY_TIMEOUT must be an integer number of seconds") from exc
+        if inactivity_timeout <= 0:
+            raise ValueError("INACTIVITY_TIMEOUT must be greater than 0")
 
         return cls(
             discord_token=token,

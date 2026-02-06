@@ -96,6 +96,12 @@ def test_is_thread_message(bot):
     assert bot.is_thread_message(msg) is True
 
 
+def test_is_thread_message_rejects_non_thread_string_type(bot):
+    msg = _make_message("followup")
+    msg.channel.type = "threadlike-text-channel"
+    assert bot.is_thread_message(msg) is False
+
+
 def test_is_stop_command(bot):
     msg = _make_message("!stop")
     assert bot.is_stop_command(msg) is True
@@ -106,9 +112,9 @@ def test_is_stop_command(bot):
 
 def test_thread_name_from_prompt(bot):
     long_prompt = "Discuss the API design for authentication and authorization"
-    assert bot.thread_name(long_prompt) == "Discuss the API design for authentication and aut…"
-    assert bot.thread_name("Short") == "Short"
-    assert len(bot.thread_name("A" * 200)) <= 50
+    assert bot.thread_name(long_prompt) == "multiagents-session"
+    assert bot.thread_name("Short") == "multiagents-session"
+    assert "Discuss" not in bot.thread_name(long_prompt)
 
 
 async def test_stop_command_no_session(bot):
@@ -118,6 +124,38 @@ async def test_stop_command_no_session(bot):
     await bot.on_message(msg)
     # channel.send should NOT be called (no "Session stopped.")
     msg.channel.send.assert_not_called()
+
+
+async def test_active_thread_message_requires_mention(bot):
+    thread_id = 55555
+    msg = _make_message("hello without mention", thread_id=thread_id, mentions_bot=False)
+
+    fake_bridge = AsyncMock()
+    bot._bridges[thread_id] = fake_bridge
+    bot._thread_participants[thread_id] = {111}
+
+    await bot.on_message(msg)
+
+    fake_bridge.send_message.assert_not_called()
+
+
+async def test_active_thread_message_with_mention_forwards_stripped_prompt(bot):
+    thread_id = 55555
+    msg = _make_message("<@99> hello there", thread_id=thread_id, mentions_bot=True)
+
+    bot_user = MagicMock()
+    bot_user.id = 99
+    bot._connection = MagicMock()
+    bot._connection.user = bot_user
+    msg.mentions = [bot_user]
+
+    fake_bridge = AsyncMock()
+    bot._bridges[thread_id] = fake_bridge
+    bot._thread_participants[thread_id] = {111}
+
+    await bot.on_message(msg)
+
+    fake_bridge.send_message.assert_called_once_with("hello there")
 
 
 async def test_stop_command_with_session(bot):

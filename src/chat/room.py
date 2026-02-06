@@ -202,6 +202,75 @@ class ChatRoom:
             f"{_PERSISTENT_REPLY_DIRECTIVE}"
         )
 
+    @staticmethod
+    def _format_incoming_event(sender: str, message: str) -> str:
+        if sender == "user":
+            return f"[User]: {message}"
+        if sender == "dm":
+            return f"[Direct message from user]: {message}"
+        if sender == "system":
+            return f"[System]: {message}"
+        return f"[{sender.capitalize()}] shared:\n{message}"
+
+    def _drain_inbox_batch(
+        self,
+        agent_name: str,
+        first_event: tuple[str, str, int | None],
+    ) -> list[tuple[str, str, int | None]]:
+        """Drain currently buffered inbox items so one turn can process a batch."""
+        inbox = self._inboxes.get(agent_name)
+        events = [first_event]
+        if inbox is None:
+            return events
+        while True:
+            try:
+                events.append(inbox.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return events
+
+    def _format_persistent_events_prompt(
+        self,
+        agent: BaseAgent,
+        events: list[tuple[str, str, int | None]],
+        is_first_message: bool,
+    ) -> str:
+        if len(events) == 1:
+            sender, message, _ = events[0]
+            return self._format_persistent_prompt(
+                agent=agent,
+                sender=sender,
+                message=message,
+                is_first_message=is_first_message,
+            )
+
+        prelude = ""
+        if is_first_message:
+            extra = self.context_provider(agent.name) if self.context_provider else None
+            agent_role = self.roles.get(agent.name, "")
+            context = format_session_context(
+                agent.name,
+                working_dir=self.working_dir,
+                participants=self.participants,
+                role=agent_role,
+            )
+            extra_sections = ""
+            if extra:
+                extra_sections = "\n\n".join(v for v in extra.values() if v) + "\n\n"
+            prelude = f"{context}\n\n{extra_sections}"
+
+        incoming = "\n\n".join(
+            self._format_incoming_event(sender, message)
+            for sender, message, _ in events
+        )
+        return (
+            f"{prelude}"
+            "## Incoming Events\n"
+            f"{incoming}\n\n"
+            "Respond once to the combined context. Prioritize direct user requests.\n"
+            f"{_PERSISTENT_REPLY_DIRECTIVE}"
+        )
+
     async def run_persistent(
         self, initial_prompt: str | None = None, start_round: int = 0,
     ) -> AsyncGenerator[ChatEvent, None]:
@@ -283,13 +352,18 @@ class ChatRoom:
 
                 agent_idle[agent.name] = False
                 agent_passed[agent.name] = False
-                message_round = inbox_round if isinstance(inbox_round, int) else round_number
+                batched_events = self._drain_inbox_batch(
+                    agent.name, (sender, message, inbox_round),
+                )
+                round_markers = [
+                    r for _, _, r in batched_events if isinstance(r, int)
+                ]
+                message_round = max(round_markers) if round_markers else round_number
 
                 # Format the message for the agent
-                prompt = self._format_persistent_prompt(
+                prompt = self._format_persistent_events_prompt(
                     agent=agent,
-                    sender=sender,
-                    message=message,
+                    events=batched_events,
                     is_first_message=not agent_initialized[agent.name],
                 )
                 if not agent_initialized[agent.name]:

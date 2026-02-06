@@ -286,6 +286,40 @@ class PersistentSequencedAgent:
         self.cancel_calls += 1
 
 
+def test_persistent_drain_inbox_batch_collects_buffered_events():
+    agent = PersistentSequencedAgent("claude", responses=[(0.00, "[PASS]")])
+    room = ChatRoom([agent])
+    room._inboxes = {"claude": asyncio.Queue()}
+    room._inboxes["claude"].put_nowait(("user", "second", 1))
+    room._inboxes["claude"].put_nowait(("system", "notice", 1))
+
+    batch = room._drain_inbox_batch("claude", ("user", "first", 1))
+    assert batch == [
+        ("user", "first", 1),
+        ("user", "second", 1),
+        ("system", "notice", 1),
+    ]
+
+
+def test_persistent_batch_prompt_combines_events():
+    agent = PersistentSequencedAgent("claude", responses=[(0.00, "[PASS]")])
+    room = ChatRoom([agent])
+
+    prompt = room._format_persistent_events_prompt(
+        agent=agent,
+        events=[
+            ("user", "first request", 1),
+            ("system", "board changed", 1),
+            ("codex", "new findings", 1),
+        ],
+        is_first_message=False,
+    )
+    assert "## Incoming Events" in prompt
+    assert "[User]: first request" in prompt
+    assert "[System]: board changed" in prompt
+    assert "[Codex] shared:\nnew findings" in prompt
+
+
 @pytest.mark.asyncio
 async def test_persistent_round_attribution_with_overlap():
     agent = PersistentSequencedAgent(

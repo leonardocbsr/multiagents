@@ -1018,12 +1018,13 @@ class ChatRoom:
                     except asyncio.QueueEmpty:
                         break
 
-                # Check for pending restart requests (non-blocking)
-                try:
-                    restart_name, dm_text = self._restart_queue.get_nowait()
-                    pending_restarts[restart_name] = dm_text
-                except asyncio.QueueEmpty:
-                    pass
+                # Drain pending restart requests (non-blocking)
+                while not self._restart_queue.empty():
+                    try:
+                        restart_name, dm_text = self._restart_queue.get_nowait()
+                        pending_restarts[restart_name] = dm_text
+                    except asyncio.QueueEmpty:
+                        break
 
                 # Handle restarts for agents that already completed this round
                 # (their AgentCompleted was already yielded, so the event-based

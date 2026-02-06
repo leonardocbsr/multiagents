@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, X } from "lucide-react";
 import { AgentIcon, AGENT_COLORS } from "./AgentIcons";
 import type { AgentInfo } from "../types";
+import { fetchSettings } from "../api";
 
 interface Props {
   open: boolean;
@@ -14,12 +15,12 @@ const AGENT_TYPES = ["claude", "codex", "kimi"] as const;
 
 function generateName(type: string, existing: AgentInfo[]): string {
   const base = type.charAt(0).toUpperCase() + type.slice(1);
-  const sameType = existing.filter(a => a.type === type);
-  if (sameType.length === 0) return base;
-  // Find the next available number
+  const existingNames = new Set(existing.map((a) => a.name.toLowerCase()));
+  if (!existingNames.has(base.toLowerCase())) return base;
+  // Find the next available number (case-insensitive)
   for (let i = 2; ; i++) {
     const candidate = `${base}-${i}`;
-    if (!existing.some(a => a.name === candidate)) return candidate;
+    if (!existingNames.has(candidate.toLowerCase())) return candidate;
   }
 }
 
@@ -41,11 +42,20 @@ function findDuplicateNames(agents: AgentInfo[]): Set<number> {
 export default function RosterEditor({ open, defaultAgents, onStart, onClose }: Props) {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [sessionConfig, setSessionConfig] = useState<Record<string, unknown>>({});
+  const [settingsDefaults, setSettingsDefaults] = useState<Record<string, unknown>>({});
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setAgents(defaultAgents.length > 0 ? [...defaultAgents] : [{ name: "Claude", type: "claude", role: "" }]);
       setSessionConfig({});
+      setSettingsError(null);
+      fetchSettings()
+        .then((data) => setSettingsDefaults(data as Record<string, unknown>))
+        .catch(() => {
+          setSettingsDefaults({});
+          setSettingsError("Failed to load defaults");
+        });
     }
   }, [open, defaultAgents]);
 
@@ -97,6 +107,65 @@ export default function RosterEditor({ open, defaultAgents, onStart, onClose }: 
   const duplicates = findDuplicateNames(agents);
   const hasEmptyNames = agents.some(a => !a.name.trim());
   const canStart = agents.length > 0 && duplicates.size === 0 && !hasEmptyNames;
+  const getDefault = (key: string): unknown => settingsDefaults[key];
+  const getResolved = (key: string): unknown => (key in sessionConfig ? sessionConfig[key] : getDefault(key));
+  const getResolvedText = (key: string): string => {
+    const value = getResolved(key);
+    if (value === null || value === undefined) return "";
+    return String(value);
+  };
+  const getResolvedNumber = (key: string): number | "" => {
+    const value = getResolved(key);
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && value !== "") {
+      const num = Number(value);
+      if (!Number.isNaN(num)) return num;
+    }
+    return "";
+  };
+  const setTextOverride = (key: string, raw: string) => {
+    setSessionConfig((prev) => {
+      const next = { ...prev };
+      const defaultValue = getDefault(key);
+      const defaultText = defaultValue === null || defaultValue === undefined ? "" : String(defaultValue);
+      if (raw === defaultText) {
+        delete next[key];
+      } else {
+        next[key] = raw || undefined;
+      }
+      return next;
+    });
+  };
+  const setNumberOverride = (key: string, raw: string) => {
+    setSessionConfig((prev) => {
+      const next = { ...prev };
+      if (raw === "") {
+        delete next[key];
+        return next;
+      }
+      const num = Number(raw);
+      if (Number.isNaN(num)) return prev;
+      const defaultValue = getDefault(key);
+      if (typeof defaultValue === "number" && num === defaultValue) {
+        delete next[key];
+      } else {
+        next[key] = num;
+      }
+      return next;
+    });
+  };
+  const setSelectOverride = (key: string, raw: string) => {
+    setSessionConfig((prev) => {
+      const next = { ...prev };
+      const defaultValue = String(getDefault(key) ?? "");
+      if (raw === defaultValue) {
+        delete next[key];
+      } else {
+        next[key] = raw;
+      }
+      return next;
+    });
+  };
 
   if (!open) return null;
 
@@ -193,24 +262,104 @@ export default function RosterEditor({ open, defaultAgents, onStart, onClose }: 
         {/* Session-level config overrides */}
         <details className="px-4 pb-3">
           <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors">
-            Session Settings
+            Session Settings (Overrides)
           </summary>
-          <div className="mt-2 space-y-2">
-            {AGENT_TYPES.map(type => (
-              <div key={type} className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400 capitalize w-14">{type}</span>
+          <div className="mt-2 space-y-3">
+            <p className="text-[10px] text-zinc-500">
+              Leave blank to use defaults.
+            </p>
+            {settingsError && (
+              <p className="text-[10px] text-yellow-400">{settingsError}</p>
+            )}
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Agent Models</p>
+              {AGENT_TYPES.map(type => {
+                const key = `agents.${type}.model`;
+                return (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-400 capitalize w-14">{type}</span>
+                    <input
+                      type="text"
+                      value={getResolvedText(key)}
+                      onChange={(e) => setTextOverride(key, e.target.value)}
+                      className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Agent System Prompts</p>
+              {AGENT_TYPES.map(type => {
+                const key = `agents.${type}.system_prompt`;
+                return (
+                  <div key={key} className="flex items-start gap-2">
+                    <span className="text-xs text-zinc-400 capitalize w-14 pt-1">{type}</span>
+                    <textarea
+                      value={getResolvedText(key)}
+                      onChange={(e) => setTextOverride(key, e.target.value)}
+                      rows={2}
+                      className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500 font-mono resize-y"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Agent Permissions</p>
+              {AGENT_TYPES.map(type => {
+                const key = `agents.${type}.permissions`;
+                const defaultValue = String(getDefault(key) ?? "bypass");
+                const current = String(getResolved(key) ?? defaultValue);
+                return (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-400 capitalize w-14">{type}</span>
+                    <select
+                      value={current}
+                      onChange={(e) => setSelectOverride(key, e.target.value)}
+                      className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
+                    >
+                      <option value="bypass">Bypass</option>
+                      <option value="auto">Auto</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] text-zinc-400 uppercase tracking-wide">Runtime</p>
+              {[
+                "timeouts.idle",
+                "timeouts.parse",
+                "timeouts.send",
+                "timeouts.hard",
+                "permissions.timeout",
+              ].map((key) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="text-xs text-zinc-400 w-32">{key}</span>
+                  <input
+                    type="number"
+                    value={getResolvedNumber(key)}
+                    onChange={(e) => setNumberOverride(key, e.target.value)}
+                    className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500"
+                  />
+                </div>
+              ))}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400 w-32">memory.model</span>
                 <input
                   type="text"
-                  value={sessionConfig[`agents.${type}.model`] as string || ""}
-                  onChange={(e) => setSessionConfig(prev => ({
-                    ...prev,
-                    [`agents.${type}.model`]: e.target.value || undefined,
-                  }))}
-                  placeholder="Model (default)"
-                  className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                  value={getResolvedText("memory.model")}
+                  onChange={(e) => setTextOverride("memory.model", e.target.value)}
+                  className="flex-1 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500"
                 />
               </div>
-            ))}
+            </div>
           </div>
         </details>
 

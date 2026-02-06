@@ -158,7 +158,7 @@ class BaseAgent(ABC):
         self, prompt: str, timeout: float,
     ) -> AsyncGenerator[str | AgentResponse | AgentNotice | AgentPermissionRequest, None]:
         """Persistent-pipe streaming: delegates to PersistentAgent, translates events."""
-        from .protocols.base import TextDelta, ThinkingDelta, ToolBadge, TurnComplete
+        from .protocols.base import TextDelta, ThinkingDelta, ToolBadge, ToolOutput, ToolResult, TurnComplete
         from .protocols.base import PermissionRequest as ProtoPermReq
 
         pa = self._ensure_persistent()
@@ -178,6 +178,15 @@ class BaseAgent(ABC):
                         yield f"<thinking>{event.text}</thinking>\n"
                     elif isinstance(event, ToolBadge):
                         yield _tool_badge(event.label, event.detail)
+                    elif isinstance(event, ToolOutput):
+                        truncated = event.text[:500]
+                        yield f"<tool_output>{truncated}</tool_output>\n"
+                    elif isinstance(event, ToolResult):
+                        tag = "result" if event.success else "error"
+                        label = _TOOL_LABELS.get(event.tool_name, event.tool_name)
+                        detail = event.output[:200] if event.output else ""
+                        body = f"{label} {detail}".strip() if detail else label
+                        yield f"<{tag}>{body}</{tag}>\n"
                     elif isinstance(event, ProtoPermReq):
                         yield AgentPermissionRequest(
                             agent=self.name,

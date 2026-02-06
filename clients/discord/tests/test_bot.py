@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 
-from src.bot import MultiAgentsBot
+from src.bot import MultiAgentsBot, MAX_RECONNECT_ATTEMPTS
+from src.bridge import ConnectionLost
 from src.config import Config
 
 
@@ -108,3 +109,105 @@ def test_thread_name_from_prompt(bot):
     assert bot.thread_name(long_prompt) == "Discuss the API design for authentication and aut…"
     assert bot.thread_name("Short") == "Short"
     assert len(bot.thread_name("A" * 200)) <= 50
+
+
+async def test_stop_command_no_session(bot):
+    """!stop in a thread without an active session is ignored (no archive)."""
+    msg = _make_message("!stop", thread_id=55555)
+    # No bridge registered for this thread
+    await bot.on_message(msg)
+    # channel.send should NOT be called (no "Session stopped.")
+    msg.channel.send.assert_not_called()
+
+
+async def test_stop_command_with_session(bot):
+    """!stop in a thread with an active session stops and archives."""
+    thread_id = 55555
+    msg = _make_message("!stop", thread_id=thread_id)
+    msg.channel.edit = AsyncMock()
+
+    # Register a fake bridge
+    fake_bridge = AsyncMock()
+    bot._bridges[thread_id] = fake_bridge
+
+    await bot.on_message(msg)
+
+    fake_bridge.cancel.assert_called_once()
+    fake_bridge.close.assert_called_once()
+    msg.channel.send.assert_called_once_with("Session stopped.")
+    assert thread_id not in bot._bridges
+
+
+async def test_start_session_post_connect_failure(bot):
+    """If send_message fails after connect, state is cleaned up."""
+    thread = MagicMock()
+    thread.id = 12345
+    thread.send = AsyncMock()
+
+    fake_bridge = AsyncMock()
+    fake_bridge.connect_and_create = AsyncMock(return_value="sess-1")
+    fake_bridge.send_message = AsyncMock(side_effect=RuntimeError("send failed"))
+
+    with patch("src.bot.Bridge", return_value=fake_bridge):
+        await bot._start_session(thread, "test prompt")
+
+    # Bridge should be cleaned up
+    assert 12345 not in bot._bridges
+    # User should be notified
+    assert any("Failed" in str(call) for call in thread.send.call_args_list)
+
+
+async def test_listen_loop_reconnects_on_connection_lost(bot):
+    """Listen loop attempts reconnection on ConnectionLost."""
+    thread = MagicMock()
+    thread.id = 77777
+    thread.send = AsyncMock()
+
+    call_count = 0
+
+    class FakeBridge:
+        async def listen(self, on_event):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionLost("disconnected")
+            # After successful reconnect, raise a non-ConnectionLost error
+            # to break the loop (simulates unexpected crash)
+            raise RuntimeError("unexpected")
+
+        async def reconnect(self):
+            pass  # Successful reconnect
+
+    bridge = FakeBridge()
+    bot._bridges[thread.id] = bridge
+
+    await bot._listen_loop(thread, bridge)
+
+    # Should have sent reconnection messages
+    send_calls = [str(c) for c in thread.send.call_args_list]
+    assert any("Connection lost" in s for s in send_calls)
+    assert any("Reconnected" in s for s in send_calls)
+
+
+async def test_listen_loop_gives_up_after_max_attempts(bot):
+    """Listen loop gives up after MAX_RECONNECT_ATTEMPTS."""
+    thread = MagicMock()
+    thread.id = 88888
+    thread.send = AsyncMock()
+
+    class FakeBridge:
+        async def listen(self, on_event):
+            raise ConnectionLost("disconnected")
+
+        async def reconnect(self):
+            raise RuntimeError("server down")
+
+    bridge = FakeBridge()
+    bot._bridges[thread.id] = bridge
+
+    await bot._listen_loop(thread, bridge)
+
+    send_calls = [str(c) for c in thread.send.call_args_list]
+    assert any("Lost connection" in s for s in send_calls)
+    # Thread should be cleaned up
+    assert thread.id not in bot._bridges

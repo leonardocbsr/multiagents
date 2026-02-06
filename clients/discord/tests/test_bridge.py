@@ -5,7 +5,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.bridge import Bridge
+from src.bridge import Bridge, ConnectionLost
 
 
 class FakeWebSocket:
@@ -44,6 +44,23 @@ class FakeWebSocket:
     @property
     def sent_messages(self) -> list[dict]:
         return self._sent
+
+
+class FakeWebSocketDisconnect(FakeWebSocket):
+    """Simulates a connection that drops mid-stream."""
+
+    def __init__(self, incoming: list[dict] | None = None, fail_after: int = 0):
+        super().__init__(incoming)
+        self._fail_after = fail_after
+        self._iter_count = 0
+
+    async def __anext__(self):
+        # Deliver handshake messages via recv(), iteration messages here
+        if self._iter_count >= self._fail_after:
+            import websockets
+            raise websockets.ConnectionClosed(None, None)
+        self._iter_count += 1
+        return await super().__anext__()
 
 
 @pytest.fixture
@@ -132,3 +149,120 @@ async def test_close(bridge):
 
     await bridge.close()
     assert ws._closed is True
+
+
+async def test_reconnect(bridge):
+    """Reconnect sends join_session with last_event_id."""
+    # Initial connection
+    ws1 = FakeWebSocket(incoming=[
+        {"type": "connected"},
+        {"type": "session_created", "session_id": "sess-1", "agents": []},
+    ])
+    with patch("src.bridge.websockets") as mock_ws:
+        mock_ws.connect = AsyncMock(return_value=ws1)
+        await bridge.connect_and_create(["claude"])
+
+    # Simulate having received some events
+    bridge._last_event_id = 42
+
+    # Reconnect
+    ws2 = FakeWebSocket(incoming=[
+        {"type": "connected"},
+        {"type": "session_joined", "session_id": "sess-1", "messages": [], "is_running": False},
+    ])
+    with patch("src.bridge.websockets") as mock_ws:
+        mock_ws.connect = AsyncMock(return_value=ws2)
+        await bridge.reconnect()
+
+    assert ws2.sent_messages[0] == {
+        "type": "join_session",
+        "session_id": "sess-1",
+        "last_event_id": 42,
+    }
+
+
+async def test_reconnect_no_session(bridge):
+    """Reconnect without a session_id raises RuntimeError."""
+    with pytest.raises(RuntimeError, match="No session"):
+        await bridge.reconnect()
+
+
+async def test_listen_raises_connection_lost(bridge):
+    """Listen raises ConnectionLost when connection drops."""
+    ws = FakeWebSocketDisconnect(
+        incoming=[
+            {"type": "connected"},
+            {"type": "session_created", "session_id": "sess-1", "agents": []},
+            {"type": "round_started", "event_id": 1, "round": 1, "agents": ["claude"]},
+        ],
+        fail_after=1,  # Deliver 1 event then disconnect
+    )
+    with patch("src.bridge.websockets") as mock_ws:
+        mock_ws.connect = AsyncMock(return_value=ws)
+        mock_ws.ConnectionClosed = __import__("websockets").ConnectionClosed
+        await bridge.connect_and_create(["claude"])
+
+    events: list[dict] = []
+
+    async def on_event(event: dict):
+        events.append(event)
+
+    with pytest.raises(ConnectionLost):
+        await bridge.listen(on_event)
+
+
+async def test_ack_sent_during_listen(bridge):
+    """ACKs are sent for events with event_id."""
+    ws = FakeWebSocket(incoming=[
+        {"type": "connected"},
+        {"type": "session_created", "session_id": "sess-1", "agents": []},
+        {"type": "round_started", "event_id": 5, "round": 1, "agents": ["claude"]},
+        {"type": "agent_completed", "event_id": 10, "agent": "claude", "text": "ok", "passed": False, "success": True},
+    ])
+    with patch("src.bridge.websockets") as mock_ws:
+        mock_ws.connect = AsyncMock(return_value=ws)
+        await bridge.connect_and_create(["claude"])
+
+    events: list[dict] = []
+
+    async def on_event(event: dict):
+        events.append(event)
+
+    # listen will raise ConnectionLost when FakeWebSocket runs out of messages
+    # (StopAsyncIteration → normal loop end → ConnectionLost)
+    with pytest.raises(ConnectionLost):
+        await bridge.listen(on_event)
+
+    # After listen, a final ack should have been sent
+    ack_msgs = [m for m in ws.sent_messages if m.get("type") == "ack"]
+    assert len(ack_msgs) >= 1
+    assert ack_msgs[-1]["event_id"] == 10
+    assert bridge._last_acked_id == 10
+
+
+async def test_send_ack_only_when_needed(bridge):
+    """_send_ack is a no-op when already acked."""
+    ws = FakeWebSocket(incoming=[
+        {"type": "connected"},
+        {"type": "session_created", "session_id": "sess-1", "agents": []},
+    ])
+    with patch("src.bridge.websockets") as mock_ws:
+        mock_ws.connect = AsyncMock(return_value=ws)
+        await bridge.connect_and_create(["claude"])
+
+    # No events received — ack should be no-op
+    await bridge._send_ack()
+    ack_msgs = [m for m in ws.sent_messages if m.get("type") == "ack"]
+    assert len(ack_msgs) == 0
+
+    # Set event_id manually
+    bridge._last_event_id = 7
+    await bridge._send_ack()
+    ack_msgs = [m for m in ws.sent_messages if m.get("type") == "ack"]
+    assert len(ack_msgs) == 1
+    assert ack_msgs[0]["event_id"] == 7
+
+    # Calling again should not send duplicate
+    await bridge._send_ack()
+    ack_msgs = [m for m in ws.sent_messages if m.get("type") == "ack"]
+    assert len(ack_msgs) == 1

@@ -7,11 +7,15 @@ from typing import Any
 import discord
 
 from .allowlist import is_allowed
-from .bridge import Bridge
+from .bridge import Bridge, ConnectionLost
 from .config import Config
 from .formatter import format_event
 
 log = logging.getLogger("multiagents-discord")
+
+MAX_RECONNECT_ATTEMPTS = 3
+BASE_RECONNECT_DELAY = 1  # seconds
+MAX_RECONNECT_DELAY = 30  # seconds
 
 
 class MultiAgentsBot(discord.Client):
@@ -65,9 +69,10 @@ class MultiAgentsBot(discord.Client):
         if not self.should_handle(message):
             return
 
-        # Stop command in a thread
+        # Stop command in a thread — only if session is active
         if self.is_thread_message(message) and self.is_stop_command(message):
-            await self._stop_session(message.channel)
+            if message.channel.id in self._bridges:
+                await self._stop_session(message.channel)
             return
 
         # Message in an active thread → forward to session
@@ -104,11 +109,16 @@ class MultiAgentsBot(discord.Client):
 
         self._bridges[thread.id] = bridge
 
-        agents_str = ", ".join(self.config.default_agents)
-        await thread.send(f"Session started with {agents_str}.")
-
-        # Send the initial prompt
-        await bridge.send_message(prompt)
+        try:
+            agents_str = ", ".join(self.config.default_agents)
+            await thread.send(f"Session started with {agents_str}.")
+            await bridge.send_message(prompt)
+        except Exception:
+            log.exception("Failed to start session for thread %s", thread.id)
+            await bridge.close()
+            self._bridges.pop(thread.id, None)
+            await thread.send("Failed to start session.")
+            return
 
         # Start listening for events in background
         listener = asyncio.create_task(self._listen_loop(thread, bridge))
@@ -118,7 +128,8 @@ class MultiAgentsBot(discord.Client):
         self._reset_inactivity_timer(thread)
 
     async def _listen_loop(self, thread: discord.Thread, bridge: Bridge):
-        """Listen for server events and post them to the thread."""
+        """Listen for server events with reconnection on disconnect."""
+        attempt = 0
 
         async def on_event(event: dict):
             messages = format_event(event)
@@ -126,11 +137,42 @@ class MultiAgentsBot(discord.Client):
                 await thread.send(msg)
 
         try:
-            await bridge.listen(on_event)
+            while True:
+                try:
+                    await bridge.listen(on_event)
+                except asyncio.CancelledError:
+                    raise
+                except ConnectionLost:
+                    attempt += 1
+                    if attempt > MAX_RECONNECT_ATTEMPTS:
+                        log.warning("Max reconnect attempts for thread %s", thread.id)
+                        await thread.send("Lost connection to server. Session ended.")
+                        break
+
+                    delay = min(MAX_RECONNECT_DELAY, BASE_RECONNECT_DELAY * (2 ** (attempt - 1)))
+                    log.info(
+                        "Reconnecting thread %s (attempt %d/%d, delay %.1fs)",
+                        thread.id, attempt, MAX_RECONNECT_ATTEMPTS, delay,
+                    )
+                    await thread.send(
+                        f"Connection lost. Reconnecting (attempt {attempt}/{MAX_RECONNECT_ATTEMPTS})..."
+                    )
+                    await asyncio.sleep(delay)
+
+                    try:
+                        await bridge.reconnect()
+                        attempt = 0
+                        await thread.send("Reconnected.")
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        log.exception("Reconnect failed for thread %s", thread.id)
+                except Exception:
+                    log.exception("Unexpected error in listener for thread %s", thread.id)
+                    await thread.send("An error occurred. Session ended.")
+                    break
         except asyncio.CancelledError:
             pass
-        except Exception:
-            log.exception("Listener error for thread %s", thread.id)
         finally:
             self._cleanup_thread(thread.id)
 

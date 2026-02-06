@@ -76,6 +76,8 @@ def format_event(event: dict) -> list[str]:
         return _format_agent_interrupted(event)
     elif event_type == "discussion_ended":
         return _format_discussion_ended(event)
+    elif event_type == "error":
+        return _format_error(event)
     else:
         return []
 
@@ -106,7 +108,15 @@ def _format_agent_completed(event: dict) -> list[str]:
     parts.append(share)
 
     body = f"**{agent_display}:** " + "\n".join(parts)
-    return _split_message(body)
+    chunks = _split_message(body)
+
+    # Add agent prefix to continuation chunks for readability
+    for i in range(1, len(chunks)):
+        prefix = f"**{agent_display}** *(cont'd):* "
+        if len(prefix) + len(chunks[i]) <= _DISCORD_MAX_LEN:
+            chunks[i] = prefix + chunks[i]
+
+    return chunks
 
 
 def _format_round_started(event: dict) -> list[str]:
@@ -136,3 +146,8 @@ def _format_discussion_ended(event: dict) -> list[str]:
     elif reason == "error":
         return ["Discussion ended due to an error."]
     return [f"Discussion ended ({reason})."]
+
+
+def _format_error(event: dict) -> list[str]:
+    message = event.get("message", "Unknown error")
+    return [f"Server error: {message}"]

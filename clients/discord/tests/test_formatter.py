@@ -151,6 +151,28 @@ def test_long_message_split():
         assert len(msg) <= 2000
 
 
+def test_long_message_split_has_continuation_prefix():
+    """Continuation chunks include the agent name."""
+    # Use realistic text with word breaks (not just "A" * N)
+    long_text = ("This is a sentence with words. " * 100).strip()  # ~3000 chars
+    event = {
+        "type": "agent_completed",
+        "agent": "claude",
+        "text": f"<Share>{long_text}</Share>",
+        "passed": False,
+        "success": True,
+    }
+    messages = format_event(event)
+    assert len(messages) >= 2
+    # First chunk has normal prefix
+    assert messages[0].startswith("**Claude:**")
+    # Continuation chunks have cont'd prefix
+    for msg in messages[1:]:
+        assert "Claude" in msg
+        assert "cont'd" in msg
+        assert len(msg) <= 2000
+
+
 def test_unknown_event_ignored():
     event = {"type": "agent_stream", "agent": "claude", "chunk": "partial"}
     messages = format_event(event)
@@ -169,3 +191,21 @@ def test_multiple_share_blocks():
     assert len(messages) == 1
     assert "First point." in messages[0]
     assert "Second point." in messages[0]
+
+
+def test_error_event():
+    event = {
+        "type": "error",
+        "message": "Session not found",
+    }
+    messages = format_event(event)
+    assert len(messages) == 1
+    assert "Session not found" in messages[0]
+    assert "error" in messages[0].lower()
+
+
+def test_error_event_default_message():
+    event = {"type": "error"}
+    messages = format_event(event)
+    assert len(messages) == 1
+    assert "Unknown error" in messages[0]

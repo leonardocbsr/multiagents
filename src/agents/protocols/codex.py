@@ -15,7 +15,7 @@ import json
 import logging
 from typing import AsyncIterator
 
-from .base import AgentEvent, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, TurnComplete
+from .base import AgentEvent, ProtocolAdapter, TextDelta, ThinkingDelta, ToolBadge, ToolOutput, TurnComplete
 from ..base import _short_path
 
 log = logging.getLogger("multiagents")
@@ -287,16 +287,23 @@ class CodexProtocol(ProtocolAdapter):
 
             # Command execution output delta — command stdout/stderr
             if method == "item/commandExecution/outputDelta":
-                # Don't stream command output as text (can be very verbose),
-                # but the item/started badge already signals activity.
+                delta = params.get("delta", "")
+                if delta:
+                    yield ToolOutput(tool_name="Run", text=delta[:500])
                 continue
 
             # Terminal interaction during command execution
             if method == "item/commandExecution/terminalInteraction":
+                output = params.get("output", "")
+                if output:
+                    yield ToolOutput(tool_name="Run", text=output[:500])
                 continue
 
             # File change output delta
             if method == "item/fileChange/outputDelta":
+                delta = params.get("delta", "")
+                if delta:
+                    yield ToolOutput(tool_name="Write", text=delta[:500])
                 continue
 
             # MCP tool call progress
